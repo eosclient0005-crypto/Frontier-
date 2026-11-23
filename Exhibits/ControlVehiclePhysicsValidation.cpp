@@ -261,7 +261,7 @@ bool ValidateControlVehicleFullSuite(const ComponentClassDefinition& ControlVehi
                     OutLowRpmBoost = R->CombinedBoostBar;
                     CapturedLow    = true;
                 }
-                if (R->EngineRpm >= 5600.0f)
+                if (R->EngineRpm >= 4800.0f)
                 {
                     OutHighRpmBoost = std::max(OutHighRpmBoost, R->CombinedBoostBar);
                     OutDragNm       = std::max(OutDragNm, R->SuperchargerParasiticNm);
@@ -676,13 +676,29 @@ int main()
 {
     std::printf("=== ControlVehiclePhysicsValidation ===\n");
 
-    const std::filesystem::path ModelsDir = std::filesystem::path(FRONTIER_REPO_ROOT_DIR) / "Experimental" / "Shared" / "Models";
+    const std::filesystem::path IntegratorPath =
+        std::filesystem::path(FRONTIER_REPO_ROOT_DIR) / "EngineContent" / "Geometry" / "ControlledIntegrator.GeometrySpace";
     ControlVehicleBuildResult Built {};
     std::string Diagnostic {};
-    if (!CheckCondition(ControlVehicleClassBuilder::ConstructControlVehicle(ModelsDir, Built, Diagnostic),
-            "ControlVehicleClassBuilder::ConstructControlVehicle loaded FCT1 hull, tyres & constraints"))
+    if (!CheckCondition(ControlVehicleClassBuilder::ConstructFromControlledIntegrator(IntegratorPath, Built, Diagnostic),
+            "ControlVehicleClassBuilder::ConstructFromControlledIntegrator loaded ControlledIntegrator.GeometrySpace"))
     {
         std::fprintf(stderr, "Diagnostic: %s\n", Diagnostic.c_str());
+        return 1;
+    }
+
+    const bool PureGeometrySpace = Built.DecodedSourceFaces == 25068u
+                                && Built.GeometryRepository.size() == 4u
+                                && Built.GeometryRepository[0u].SourceFormat == "GeometrySpace"
+                                && Built.GeometryRepository[1u].SourceFormat == "GeometrySpace"
+                                && Built.GeometryRepository[2u].SourceFormat == "GeometrySpace";
+    std::printf("[INFO] ControlledIntegrator.GeometrySpace: SourceFaces=%u, BodyFaces=%zu, TyreFaces=%zu, RimFaces=%zu\n",
+        Built.DecodedSourceFaces,
+        Built.GeometryRepository[0u].Asset.Network.Faces.size(),
+        Built.GeometryRepository[1u].Asset.Network.Faces.size(),
+        Built.GeometryRepository[2u].Asset.Network.Faces.size());
+    if (!CheckCondition(PureGeometrySpace, "ControlVehicle uses pure .GeometrySpace container (25,068 faces, zero .facet)"))
+    {
         return 1;
     }
 

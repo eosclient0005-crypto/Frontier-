@@ -18,8 +18,9 @@
    - Extended `PhysicsExtension` (`PhysicsExtension.{h,cpp}`) with `ApplyForceAtPoint`, live `AssignBodyMassKg`, and self-ignoring `ExecuteRayCastIgnoringBody` for swept wheel-ground queries.
    - Completed all physics domains — including the previously unfinished **Supercharger**, **Turbocharger**, **Fuel Delivery**, and **6 Suspension Architectures** — and published `VehicleReading` via `ThreadBoundaryExchange` for wait-free consumption by Game, Render, Audio, and Editor threads.
 
-3. **`ControlVehicle` Integration & 8-Suite Physics Verification**
-   - Authored `Exhibits/ControlVehiclePhysicsValidation.cpp` driven directly by `ControlVehicleClassBuilder::ConstructControlVehicle` (`Experimental/Shared/Models/ControlVehicleBody.facet`, tyres, rim, springs, steering hinges, RearWing `Dock`, 6-speed gearbox, 18-point torque curve).
+3. **`ControlledIntegrator.GeometrySpace` Integration & 8-Suite Physics Verification**
+   - Migrated `ControlVehicleClassBuilder` (`ControlVehicleClassBuilder.{h,cpp}`) off `.facet` onto Frontier's Two-Tier Hybrid container `EngineContent/Geometry/ControlledIntegrator.GeometrySpace` (`Codecs::GeometryDecoder::DecodeFromFile`), automatically partitioning all 25,068 faces (`2,911` body, `3,973` canonical FL tyre, `1,568` canonical FL rim) and measuring exact wheel hub coordinates & tyre radius (`0.50855 m`) directly from the `.GeometrySpace` mesh.
+   - Verified `Exhibits/ControlVehiclePhysicsValidation.cpp` directly on `ControlledIntegrator.GeometrySpace` (`SourceFormat == "GeometrySpace"`, zero `.facet`).
 
 ---
 
