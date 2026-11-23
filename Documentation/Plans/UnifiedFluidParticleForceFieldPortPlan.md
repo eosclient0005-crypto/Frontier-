@@ -241,40 +241,40 @@ Exhibits/                                            # PHASE 5 (Automated Numeri
 
 ### 1.1 Exact 20 Analytic Force Models (`ForceModelOrdinal` — 1:1 `ForceGeneratorCatalog.js` ↔ `ForceFieldChunk`)
 
-| Code | C++ `ForceModelOrdinal` | HTML Display Name | Exact Formula (`ForceFieldChunk` 1:1) | Gas Velocity-Saturated? |
+| Code | C++ `ForceModelOrdinal` | HTML Display Name | Exact Formula (`ForceFieldChunk` `L294–L493` 1:1) | Gas Velocity-Saturated? |
 | :---: | :--- | :--- | :--- | :---: |
-| `0` | `DirectionalWind` | Directional Wind | `dir * strength * falloff` | Yes |
-| `1` | `PointAttractor` | Point Attractor | `-r̂ * strength * falloff` | Yes |
-| `2` | `PointRepulsor` | Point Repulsor | `+r̂ * strength * falloff` | Yes |
-| `3` | `RotationalColumn` | Vortex Column | `(tangent * strength + (-radDir) * p1 * strength + dir * p2 * strength) * falloff` (Rankine core `core = max(0.08 * radius, 0.05)`) | Yes |
-| `4` | `CurlNoiseTurbulence` | Curl Noise Turbulence | `CurlNoise(world * p1 + vec3(0, time * p2, time * p2 * 0.6)) * strength * falloff` | Yes |
-| `5` | `DragBaffle` | Drag Baffle | `-velocity * strength * falloff` | **No** (velocity-relative) |
-| `6` | `RadialBurst` | Radial Burst | `r̂ * strength * exp(-phase * 6) * step(phase, 0.6) * falloff` | **No** (short-lived pulse) |
-| `7` | `ThermalUpdraft` | Thermal Updraft | `(dir * (1 - 0.35 * axial²) + (-radDir) * p1) * strength * exp(-radialDist² / (2 * (0.45 * radius)²))` | Yes |
-| `8` | `AxisAttractor` | Axis Attractor | `-radDir * strength * falloff` (pulls toward infinite/finite axis line) | Yes |
-| `9` | `RotationalRing` | Vortex Ring | Torus core (`majorR = p1 * radius`, `minorR = p2 * radius`); circulates around torus cross-section (`cross(torusTangent, toCore)`) | Yes |
-| `10` | `Orbit` | Orbit | Tangential orbital speed around `dir` + radial stabilization spring `p1 * (targetR - radialDist)` | Yes |
-| `11` | `Containment` | Containment | Inward restoring wall beyond `inner = radius * (1 - p1)` with elastic damping | **No** (boundary constraint) |
-| `12` | `ShockwaveShell` | Shockwave Shell | Expanding spherical pulse `shellR = radius * phase`, Gaussian shell width `p1 * radius` | **No** (short-lived pulse) |
-| `13` | `Implosion` | Implosion | Inward collapsing spherical shell (`1 - phase`) with core compression | **No** (short-lived pulse) |
-| `14` | `DirectionalBurst` | Directional Burst | Pulsed collimated jet along `dir` (`exp(-phase * 6)`) | **No** (short-lived pulse) |
-| `15` | `BrownianJitter` | Brownian Jitter | High-frequency hashed pseudo-random impulse `Hash31(floor(world * p1 + time * p2)) * strength * falloff` | Yes |
-| `16` | `DirectedStream` | Flow Stream | Drives velocity toward target stream velocity `(dir * strength - velocity) * p1 * falloff` | **No** (velocity-relative) |
-| `17` | `WindShear` | Wind Shear | Height/axis-stratified crosswind `crossDir * (dot(r, dir) / radius) * strength * falloff` | Yes |
-| `18` | `Spin` | Spin | Pure rigid angular torque around `dir`: `cross(dir, r) * strength * falloff` | Yes |
-| `19` | `MagneticDipole` | Magnetic Dipole | Dipole field `B = (3 * dot(m, r̂) * r̂ - m) / (dist³ + core³)`; Lorentz force `cross(velocity, B) * strength * falloff` | Yes |
+| `0` | `DirectionalWind` | Directional Wind | `axis * strength * (1 + secondary * (ValueNoise(p*0.6 + vec3(t*freq, 0, t*freq*0.7))*2 - 1)) * w` | Yes |
+| `1` | `PointAttractor` | Point Attractor | `-dir * strength * w * (dist / (dist + max(secondary, 0.02)*radius + 1e-4))` | Yes |
+| `2` | `PointRepulsor` | Point Repulsor | `+dir * strength * w * (dist / (dist + max(secondary, 0.02)*radius + 1e-4))` | Yes |
+| `3` | `RotationalColumn` | Vortex Column | `(tangent * strength * core - radialDir * strength * 0.3 * freq + axis * secondary) * w` (`core = radialDist / (radialDist + 0.12*radius)`) | Yes |
+| `4` | `CurlNoiseTurbulence` | Curl Noise Turbulence | `CurlNoise(p * freq + vec3(0, t * secondary, t * secondary * 0.31)) * strength * w * 0.35` | Yes |
+| `5` | `DragBaffle` | Drag Baffle | `-velocity * strength * w` | **No** (velocity-relative) |
+| `6` | `RadialBurst` | Radial Burst | `+dir * strength * PulseEnvelope(freq, secondary, tertiary) * w` | **No** (short-lived pulse) |
+| `7` | `ThermalUpdraft` | Thermal Updraft | `axis * strength * Falloff(mode, radialDist / radius)` | Yes |
+| `8` | `AxisAttractor` | Axis Attractor | `-radialDir * strength * Falloff(mode, radialDist / radius)` | Yes |
+| `9` | `RotationalRing` | Vortex Ring | `ringPoint = centre + radialDir * radius`, `circulation = cross(cross(axis, radialDir), normalize(p - ringPoint)) * strength * Falloff(mode, coreDist / max(freq, 0.05))` | Yes |
+| `10` | `Orbit` | Orbit | `(tangent * (radialDist / (radialDist + 0.1*radius)) + toCentre * secondary) * strength * w` | Yes |
+| `11` | `Containment` | Containment | `overshoot = dist - radius * (1 - max(secondary, 0.02))`; `-dir * strength * wall²` (`wall = clamp(overshoot / (max(secondary, 0.02)*radius), 0, 1)`) | **No** (boundary constraint) |
+| `12` | `ShockwaveShell` | Shockwave Shell | `shell = exp(-((dist - phase*radius) / (max(secondary, 0.02)*radius))²)`; `dir * strength * shell * (1 - phase * 0.7)` | **No** (short-lived pulse) |
+| `13` | `Implosion` | Implosion | `-dir * strength * PulseEnvelope(freq, secondary, tertiary) * w` | **No** (short-lived pulse) |
+| `14` | `DirectionalBurst` | Directional Burst | `axis * strength * PulseEnvelope(freq, secondary, tertiary) * w` | **No** (short-lived pulse) |
+| `15` | `BrownianJitter` | Brownian Jitter | `Hash33(floor(p * freq) + floor(t * max(secondary, 0.1)) * 17.0) * strength * w` | Yes |
+| `16` | `DirectedStream` | Flow Stream | `(axis * freq - velocity) * strength * w` | **No** (velocity-relative) |
+| `17` | `WindShear` | Wind Shear | `angle = clamp(dot(r, axis)/radius, -1, 1) * secondary * PI`; `(u * cos(angle) + v * sin(angle)) * strength * w` | Yes |
+| `18` | `Spin` | Spin | `cross(axis, radial) / radius * strength * Falloff(mode, radialDist / radius)` | Yes |
+| `19` | `MagneticDipole` | Magnetic Dipole | `field = 3 * n * dot(axis, n) - axis`; `SafeNormalise(field) * strength * w * mix((core/d)³, 1.0, 0.35)` | Yes |
 
 ### 1.2 Exact 7 Falloff Curves (`ForceFalloffOrdinal`, Codes `0..6`)
 
-| Code | `ForceFalloffOrdinal` | Exact Formula (`u = clamp(distance / radius, 0, 1)`) |
+| Code | `ForceFalloffOrdinal` | Exact Formula (`ForceFieldChunk` `L305–L316`, `d >= 1 => 0` except `3`) |
 | :---: | :--- | :--- |
-| `0` | `SmoothStep` | `1.0 - smoothstep(0.0, 1.0, u)` |
-| `1` | `Linear` | `1.0 - u` |
-| `2` | `InverseSquare` | `1.0 / (1.0 + 12.0 * u * u) * step(u, 1.0)` |
+| `0` | `SmoothStep` | `1.0 - smoothstep(0.0, 1.0, d)` |
+| `1` | `Linear` | `1.0 - d` |
+| `2` | `InverseSquare` | `(1.0 / (1.0 + 16.0 * d * d)) * (1.0 - smoothstep(0.85, 1.0, d))` |
 | `3` | `Constant` | `1.0` (infinite range, ignores `radius`) |
-| `4` | `Gaussian` | `exp(-4.5 * u * u) * step(u, 1.0)` |
-| `5` | `Plateau` | `1.0 - smoothstep(0.65, 1.0, u)` |
-| `6` | `Cosine` | `0.5 + 0.5 * cos(3.14159265 * u)` |
+| `4` | `Gaussian` | `exp(-d * d * 5.0) * (1.0 - smoothstep(0.9, 1.0, d))` |
+| `5` | `Plateau` | `1.0 - smoothstep(0.55, 1.0, d)` |
+| `6` | `Cosine` | `0.5 + 0.5 * cos(d * 3.14159265)` |
 
 ### 1.3 GPU Buffer Layout (`ForceModelGpuRecord` — 64 Bytes, 16-Byte Aligned)
 
