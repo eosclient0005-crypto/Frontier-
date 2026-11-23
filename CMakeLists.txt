@@ -947,6 +947,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/ForceFields/ForceModelRegistry.cpp
     Engine/SimulationSpace/ForceFields/ForceFieldSampler.cpp
     Engine/SimulationSpace/ForceFields/KeyTrackSampler.cpp
+    Engine/SimulationSpace/EffectLayers/EffectLayerSpecification.cpp
+    Engine/SimulationSpace/EffectLayers/EffectLayerStack.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
     Engine/SimulationSpace/PhysicsSpace/CollisionDetection.cpp
