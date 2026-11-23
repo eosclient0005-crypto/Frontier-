@@ -276,65 +276,69 @@ const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
 const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const mul3 = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
 
-// Reference: Experimental/FluidEditor/Engine/FluidShaders.js L234-L293 (NoiseChunk)
+// Reference: Experimental/FluidEditor/Engine/FluidShaders.js L234-L293 (NoiseChunk — IEEE-754 float32 matching GLSL highp float)
 function Hash33(p)
 {
-    const px = dot3(p, [127.1, 311.7, 74.7]);
-    const py = dot3(p, [269.5, 183.3, 246.1]);
-    const pz = dot3(p, [113.5, 271.9, 124.6]);
-    return [
-        fract(Math.sin(px) * 43758.5453123) * 2.0 - 1.0,
-        fract(Math.sin(py) * 43758.5453123) * 2.0 - 1.0,
-        fract(Math.sin(pz) * 43758.5453123) * 2.0 - 1.0,
-    ];
+    const p0 = f32(p[0]), p1 = f32(p[1]), p2 = f32(p[2]);
+    const px = f32(f32(f32(p0 * f32(127.1)) + f32(p1 * f32(311.7))) + f32(p2 * f32(74.7)));
+    const py = f32(f32(f32(p0 * f32(269.5)) + f32(p1 * f32(183.3))) + f32(p2 * f32(246.1)));
+    const pz = f32(f32(f32(p0 * f32(113.5)) + f32(p1 * f32(271.9))) + f32(p2 * f32(124.6)));
+    const k = f32(43758.5453123);
+    const h = (q) => f32(f32(fract(f32(f32(Math.sin(q)) * k))) * 2.0 - 1.0);
+    return [h(px), h(py), h(pz)];
 }
 
 function GradientNoise(p)
 {
-    const i = [Math.floor(p[0]), Math.floor(p[1]), Math.floor(p[2])];
-    const f = [p[0] - i[0], p[1] - i[1], p[2] - i[2]];
-    const u = f.map((v) => v * v * v * (v * (v * 6.0 - 15.0) + 10.0));
-    const corner = (dx, dy, dz) => dot3(Hash33([i[0] + dx, i[1] + dy, i[2] + dz]), [f[0] - dx, f[1] - dy, f[2] - dz]);
-    const x00 = mix(corner(0, 0, 0), corner(1, 0, 0), u[0]);
-    const x10 = mix(corner(0, 1, 0), corner(1, 1, 0), u[0]);
-    const x01 = mix(corner(0, 0, 1), corner(1, 0, 1), u[0]);
-    const x11 = mix(corner(0, 1, 1), corner(1, 1, 1), u[0]);
-    return mix(mix(x00, x10, u[1]), mix(x01, x11, u[1]), u[2]);
+    const p0 = f32(p[0]), p1 = f32(p[1]), p2 = f32(p[2]);
+    const i = [Math.floor(p0), Math.floor(p1), Math.floor(p2)];
+    const f = [f32(p0 - i[0]), f32(p1 - i[1]), f32(p2 - i[2])];
+    const u = f.map((v) => f32(f32(f32(v * v) * v) * f32(f32(v * f32(f32(v * 6.0) - 15.0)) + 10.0)));
+    const corner = (dx, dy, dz) => {
+        const h = Hash33([f32(i[0] + dx), f32(i[1] + dy), f32(i[2] + dz)]);
+        return f32(f32(f32(h[0] * f32(f[0] - dx)) + f32(h[1] * f32(f[1] - dy))) + f32(h[2] * f32(f[2] - dz)));
+    };
+    const x00 = f32(mix(corner(0, 0, 0), corner(1, 0, 0), u[0]));
+    const x10 = f32(mix(corner(0, 1, 0), corner(1, 1, 0), u[0]));
+    const x01 = f32(mix(corner(0, 0, 1), corner(1, 0, 1), u[0]));
+    const x11 = f32(mix(corner(0, 1, 1), corner(1, 1, 1), u[0]));
+    return f32(mix(f32(mix(x00, x10, u[1])), f32(mix(x01, x11, u[1])), u[2]));
 }
 
 function ValueNoise(p)
 {
     // GLSL mat3(c0x, c0y, c0z, c1x, c1y, c1z, c2x, c2y, c2z) is column-major!
     const rot = (v) => [
-        0.00 * v[0] + (-0.80) * v[1] + (-0.60) * v[2],
-        0.80 * v[0] +   0.36  * v[1] + (-0.48) * v[2],
-        0.60 * v[0] + (-0.48) * v[1] +   0.64  * v[2],
+        f32(f32(f32(0.00 * v[0]) + f32(f32(-0.80) * v[1])) + f32(f32(-0.60) * v[2])),
+        f32(f32(f32(f32(0.80) * v[0]) + f32(f32(0.36) * v[1])) + f32(f32(-0.48) * v[2])),
+        f32(f32(f32(f32(0.60) * v[0]) + f32(f32(-0.48) * v[1])) + f32(f32(0.64) * v[2])),
     ];
-    let q = [...p];
+    let q = [f32(p[0]), f32(p[1]), f32(p[2])];
     let sum = GradientNoise(q);
-    q = mul3(rot(q), 2.02);
-    sum += 0.5 * GradientNoise(q);
-    q = mul3(rot(q), 2.03);
-    sum += 0.25 * GradientNoise(q);
-    return clamp((sum / 1.75) * 0.75 + 0.5, 0.0, 1.0);
+    q = mul3(rot(q), f32(2.02)).map(f32);
+    sum = f32(sum + f32(0.5 * GradientNoise(q)));
+    q = mul3(rot(q), f32(2.03)).map(f32);
+    sum = f32(sum + f32(0.25 * GradientNoise(q)));
+    return clamp(f32(f32(f32(sum / f32(1.75)) * f32(0.75)) + 0.5), 0.0, 1.0);
 }
 
 function PotentialNoise(p)
 {
     return [
         GradientNoise(p),
-        GradientNoise([p[0] + 31.7, p[1] + 17.3, p[2] + 9.1]),
-        GradientNoise([p[0] - 12.9, p[1] + 44.2, p[2] + 23.6]),
+        GradientNoise([f32(p[0] + f32(31.7)), f32(p[1] + f32(17.3)), f32(p[2] + f32(9.1))]),
+        GradientNoise([f32(p[0] - f32(12.9)), f32(p[1] + f32(44.2)), f32(p[2] + f32(23.6))]),
     ];
 }
 
 function CurlNoise(p)
 {
-    const e = 0.03;
-    const dx = sub3(PotentialNoise([p[0] + e, p[1], p[2]]), PotentialNoise([p[0] - e, p[1], p[2]]));
-    const dy = sub3(PotentialNoise([p[0], p[1] + e, p[2]]), PotentialNoise([p[0], p[1] - e, p[2]]));
-    const dz = sub3(PotentialNoise([p[0], p[1], p[2] + e]), PotentialNoise([p[0], p[1], p[2] - e]));
-    return mul3([dy[2] - dz[1], dz[0] - dx[2], dx[1] - dy[0]], 1.0 / (2.0 * e));
+    const e = f32(0.03);
+    const p0 = f32(p[0]), p1 = f32(p[1]), p2 = f32(p[2]);
+    const dx = sub3(PotentialNoise([f32(p0 + e), p1, p2]), PotentialNoise([f32(p0 - e), p1, p2])).map(f32);
+    const dy = sub3(PotentialNoise([p0, f32(p1 + e), p2]), PotentialNoise([p0, f32(p1 - e), p2])).map(f32);
+    const dz = sub3(PotentialNoise([p0, p1, f32(p2 + e)]), PotentialNoise([p0, p1, f32(p2 - e)])).map(f32);
+    return mul3([f32(dy[2] - dz[1]), f32(dz[0] - dx[2]), f32(dx[1] - dy[0])], f32(1.0 / f32(2.0 * e))).map(f32);
 }
 
 // Reference: Experimental/FluidEditor/Engine/FluidShaders.js L294-L493 (ForceFieldChunk)
