@@ -24,6 +24,21 @@ Five prior C++ workspaces (`Fluid`, `ForceField`, `Particle`, and two coupled st
 
 ---
 
+## 🔒 1B. Mechanical Anti-Invention Protocol (6 Hard Locks)
+
+Promises do not stop agent drift on a `52,155`-line multi-domain port; **mechanical gates do**. Every single turn of execution MUST obey all 6 hard locks:
+
+| Lock | Rule | Enforcement Mechanism |
+| :---: | :--- | :--- |
+| **L1** | **Strict 1-Slice-Per-Turn Cap** | Implement **at most 1 numbered slice (`S01`–`S28`) per turn**. Read the exact reference source line range with `read_file` in the same turn immediately before writing a single line of C++ or `.slang`. Never port a whole subsystem from memory. |
+| **L2** | **Reference-Generated Oracles (Zero Self-Written Math Tests)** | Every math, stack, keytrack, and shader slice is verified against **golden JSON/binary/PNG outputs dumped directly from the authoritative JS/HTML repo** (`Node.js` / headless Chromium in `S01`) — never against synthetic assertions written by the agent from its own C++ code. |
+| **L3** | **Hard Wall: 100% 1:1 HTML Parity BEFORE Additive GPU Physics** | Slices `S01`–`S23` lock exact 1:1 HTML parity first (ForceFields → 1:1 Particles → 1:1 Fluid → 1:1 UI). Additive Frontier GPU Physics (`S24`–`S27`: Jolt `RigidColliderProxy` two-way collisions, GPU spatial-hash self-collision, conflict-colored GPU Orthotropic XPBD from `WebGpuClothAccelerator.js`) live strictly in additive layers (`220`/`221`) and **cannot begin until `S01`–`S23` are green**. |
+| **L4** | **Exact Line-Range Traceability Header** | Every ported `.h`, `.cpp`, and `.slang` file begins with a comment citing its exact upstream file and line range (e.g., `// Reference: Experimental/FluidEditor/Engine/FluidShaders.js L294-L493`) and mirrors every branch, clamp, and magic constant verbatim. |
+| **L5** | **Stop-On-Gap Rule (Zero Silent Approximation)** | If any slice hits a WebGL2→Vulkan discrepancy, missing dependency, ambiguous branch, or turn-size limit, **STOP immediately** and report the exact file + line range to the user. Quietly swapping in a simpler substitute to "make it compile" is a hard violation. |
+| **L6** | **4-Point Slice Exit Gate** | A slice cannot be marked complete until all four pass: **(1)** branch/constant parity audit against the exact reference lines, **(2)** reference oracle diff passes (`max abs err < 1e-4` float / exact int / PNG match), **(3)** `BannedWordsVocabulary.md` + zero-`And` grep returns `0` hits, **(4)** compiled, tested (`CTest`), committed & pushed. |
+
+---
+
 ## 🏗️ 2. Dependency Order & System Architecture
 
 ```text
@@ -428,13 +443,68 @@ Every phase closes ONLY when its automated C++ validation executable passes `100
 
 ---
 
-## 📋 6. Execution Milestone Checklist
+## 📋 6. Strict 1-Slice-Per-Turn Line-Indexed Execution Ledger (`S01`–`S28`)
 
-| Milestone | Scope | Primary Deliverables |
-| :---: | :--- | :--- |
-| **M0** | HTML Capture & Golden Dump | Capture `8` HTML reference PNGs + `09_NumericGoldenDump.json`; copy `LayerSpecifications.toml`, `54` presets & `71` templates into `EngineContent/Simulation/` |
-| **M1** | **Phase 1: ForceFields Backbone** | `Engine/SimulationSpace/ForceFields/*`, `Engine/SimulationSpace/EffectLayers/*`, `Engine/Shaders/ForceFields/*.slang`, `ForceFieldPhysicsCoupling`, `ForceFieldValidation` |
-| **M2** | **Phase 2A: 1:1 GPU Particle Core** | `Engine/ParticleSpace/*` (all `19` layers `201..219`, `16` shapes, `19` 3D solids, `18` cutouts, ribbons, strands, fireworks, `71` templates) + `Engine/Shaders/ParticleSpace/*.slang` |
-| **M3** | **Phase 2B: GPU Particle Collisions & XPBD** | `ParticleCollisionCompute.slang` (Jolt `RigidColliderProxy` + two-way impulse feedback), `ParticleSpatialHashCompute.slang` (self-collision), `ParticleXpbdCompute.slang` + `ParticleXpbdNetworkBuilder`, `ParticleGpuPhysicsValidation` |
-| **M4** | **Phase 3: 3D & Sparse Infinite Fluid + Volume Renderer** | `Engine/SimulationSpace/Fluid/*`, `Engine/Shaders/Fluid/*.slang` (all `9` gas layers `101..109`, `Fixed`/`WorldGrid`/`Infinite`, Wrenninge raymarcher, tracers, debris, flipbook, `192 MiB` checkpoints, post-overlays, `54` presets), `FluidSolverValidation` |
-| **M5** | **Phase 4 & 5: Unified Workspace UI, Codecs & Sign-Off** | `Engine/Workspaces/Fluid/*` (reusing `Engine/Components/`), `Engine/Codecs/Simulation/*`, `F3` telemetry tab, `FluidWorkspaceUiValidation`, side-by-side HTML vs. Native visual sign-off |
+> **Execution Rule (Locks L1–L6)**: Execute strictly in numeric order `S01 → S28`, **maximum one slice per turn**. Never start `S(N+1)` until `S(N)` clears all 4 exit gates (line audit, reference-generated oracle diff, banned-word check, build + commit + push). Notice the **Hard Parity Wall** between `S23` and `S24`: all `23` slices of pure 1:1 HTML parity lock completely before any additive Frontier GPU Physics (`S24`–`S27`) is touched.
+
+### Stage A — Reference Oracles & Baseline Capture (Phase 0)
+
+| Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
+| :---: | :--- | :--- | :--- |
+| **S01** | `Experimental/FluidEditor/` (`index.html`, `Engine/LayerSpecifications.toml`, `Presets/*.toml`, `ParticleTemplates/*.toml`) | `EngineContent/Simulation/` + `Exhibits/Images/FluidHtmlReference/` (`8` PNGs + golden `.json` dumps) | Run headless JS/Chromium directly on `FluidEditor`: capture `8` baseline PNGs + dump raw JS golden tables for `ForceGeneratorCatalog`, `KeyTracks`, `LayerStack` (`54` presets + `71` templates), `ObjectMeshCatalog` (`19` solids), `FireworkPatterns` (`10` patterns), and `ForceFieldChunk` (`20×7×16` vectors). |
+
+### Stage B — Phase 1: ForceFields Backbone & Shared Layer/Track Engine (Upstream First!)
+
+| Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
+| :---: | :--- | :--- | :--- |
+| **S02** | `Engine/ForceGeneratorCatalog.js` (`L1–L458`) | `Engine/SimulationSpace/ForceFields/{ForceModelTypes.h,ForceModelRegistry.{h,cpp}}` | All `20` `ForceModelOrdinal` (`0..19`), `7` `ForceFalloffOrdinal` (`0..6`), defaults, ranges, and parameter metadata match JS golden JSON `100%` exact. |
+| **S03** | `Engine/FluidShaders.js` `NoiseChunk` (`L234–L293`) + `ForceFieldChunk` (`L294–L493`) | `Engine/Shaders/ForceFields/{ForceFieldNoise.slang,ForceModelEvaluation.slang}` + `Engine/SimulationSpace/ForceFields/ForceFieldSampler.{h,cpp}` | CPU `ForceFieldSampler` AND Vulkan `.slang` compute output match JS `ForceFieldChunk` golden table (`20 × 7 × 16 = 2,240` vectors) to `< 1e-4` max abs error. |
+| **S04** | `Engine/KeyTracks.js` (`L1–L360`) | `Engine/SimulationSpace/ForceFields/KeyTrackSampler.{h,cpp}` | Matches JS `KeyTracks` golden dump across `Constant`/`Linear`/`Smooth` (Fritsch–Carlson)/`Bezier`, `Hold`/`Cycle`/`PingPong`, linear-light colour easing, and `KeyTimeEpsilon = 1/480` to `< 1e-5`. |
+| **S05** | `Engine/LayerSpecifications.toml` (`L1–L2274`) + `Engine/LayerStack.js` (`L1–L441`) + `Engine/LayerSpecificationValidation.js` (`L1–L109`) | `Engine/SimulationSpace/EffectLayers/{EffectLayerSpecification.{h,cpp},EffectLayerStack.{h,cpp}}` | Evaluates all `54` `Presets/*.toml` gas stacks and all `71` `ParticleTemplates/*.toml` particle stacks and matches JS `evaluateLayerStack()` JSON dump field-for-field (`< 1e-5`). |
+| **S06** | `Engine/ForceGeneratorCatalog.js` packing + `Engine/FluidShaders.js` `ForceVectorVertex` (`L1423–L1480`) + `Engine/VolumeRenderer.js` `forceGizmo` (`L575–L994`) | `Engine/SimulationSpace/ForceFields/{ForceFieldRegister.{h,cpp},ForceFieldGpuUploader.{h,cpp}}` + `Engine/Shaders/ForceFields/ForceFieldOverlayRasterization.slang` + `Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.{h,cpp}` + `Exhibits/ForceFieldValidation.cpp` | `ForceFieldValidation` passes `100%`: 64-byte SSBO upload, 100% GPU `.slang` gizmo & vector PNG matches `03_Inspector_ForceModels.png`, and Jolt dynamic body + `VehiclePhysicsRig` wind deflection verified via `PublishedReadingExchange`. |
+
+### Stage C — Phase 2A: Pure 1:1 GPU Particle Simulation & Rendering (Zero Additive Mixing)
+
+| Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
+| :---: | :--- | :--- | :--- |
+| **S07** | `Engine/ParticleCatalog.js` (`L1–L276`) + `Engine/FireworkPatterns.js` (`L1–L623`) | `Engine/ParticleSpace/{ParticleCloudTypes.h,FireworkPatternSampler.{h,cpp},ParticleTemplateRegistry.{h,cpp}}` | All `71` `ParticleTemplates/*.toml` load cleanly; all `10` firework patterns (`ClassicBouquet`..`GrandFinale` + `SkyText`) match JS golden anchor positions to `< 1e-4`. |
+| **S08** | `Engine/ObjectMeshCatalog.js` (`L1–L1167`) | `Engine/ParticleSpace/CarrierSolidRegistry.{h,cpp}` | All `19` built-in 3D solids (`UtahTeapot`..`TorusKnot`) + `.GeometrySpace`/`.obj`/`.stl` import + `3` surface sample modes (`EvenSurface`, `SurfaceVolume`, `RidgeAccent`) match JS vertex/normal/anchor golden dumps to `< 1e-4`. |
+| **S09** | `Engine/ParticleShaders.js` `ParticleShapeChunk` (`L9–L521`) + `ParticleUpdateFragment` (`L522–L752`) | `Engine/Shaders/ParticleSpace/{ParticleShapeAnchor.slang,ParticleUpdateCompute.slang}` + `Engine/ParticleSpace/ParticleGpuSimulation.{h,cpp}` (core update) | All `16` spawn shapes, `Emit`/`Cloner`, home spring/dissolve, `6` derez modes, `4` mocap clips, `4` MoGraph effectors, Boids/Swarm, ForceField coupling, Gas coupling, and floor/sphere bounce verified against JS golden particle state after `60` steps (`< 1e-3`). |
+| **S10** | `Engine/ParticleShaders.js` `ParticleShadeChunk` (`L753–L869`) + `ParticleRenderVertex` (`L870–L966`) + `ParticleFragment` (`L1088–L1340`) | `Engine/Shaders/ParticleSpace/ParticleSpriteRasterization.slang` + `ParticleGpuRenderer.{h,cpp}` (sprites) | All `7` colour modes, `18` analytical sprite cutouts (`0..17`), `Point`/`Streak`, `Alpha`/`Additive`, DOF `FocusDistance`/`Aperture`, and halo glow match reference PNG cutouts. |
+| **S11** | `Engine/ParticleShaders.js` `TrailUpdateFragment` (`L967–L993`) + `TrailVertex` (`L994–L1087`) | `Engine/Shaders/ParticleSpace/{ParticleTrailUpdateCompute.slang,ParticleRibbonRasterization.slang}` | Ring buffer up to `96` samples, `1..4` Catmull-Rom subdivisions, `TrailTaper`/`TrailFade`/`TrailRatio`/`Linger` match `05_Particles_RibbonsStrands.png`. |
+| **S12** | `Engine/ParticleShaders.js` `ObjectRenderVertex` (`L1341–L1470`) + `ObjectFragment` (`L1471–L1551`) | `Engine/Shaders/ParticleSpace/ParticleCarrierSolidRasterization.slang` | Instanced `Object3D` PBR carriers + all `3` backing surfaces (`ObsidianGlossy`, `BrushedChrome`, `GhostWireframe`) + Derez seam glow match `04_Particles_ObjectDerez.png`. |
+| **S13** | `Engine/ParticleShaders.js` `StrandVertex` (`L1552–L1947`) + `StrandFragment` (`L1948–L2073`) + `Engine/ParticleSimulation.js` (`L1–L654`) | `Engine/Shaders/ParticleSpace/ParticleStrandRasterization.slang` + `ParticleGpuRenderer` strands + 1:1 Particle parity suite in `Exhibits/ParticleGpuPhysicsValidation.cpp` | All `11` strand/web/arc modes (`OrbWeaveWeb`..`StormWeb`) × `Primary`/`Secondary` + all `71` templates step and render with zero NaN/errors and pass visual PNG check against `05_Particles_RibbonsStrands.png`. |
+
+### Stage D — Phase 3: Pure 1:1 3D Eulerian + Sparse Infinite Fluid Solver & Volume Renderer
+
+| Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
+| :---: | :--- | :--- | :--- |
+| **S14** | `Engine/FluidShaders.js` `VolumeChunk` (`L22–L97`) + `SparseVolumeChunk` (`L98–L233`) + `ColliderChunk` (`L494–L514`) + `BoundaryChunk` (`L515–L531`) + `Engine/FluidSolver.js` (`L89–L389`) | `Engine/SimulationSpace/Fluid/{FluidRegionTypes.h,SparseTileBank.{h,cpp}}` + `Engine/Shaders/Fluid/FluidVolumeAccess.slang` | Native `VK_IMAGE_TYPE_3D` `RGBA16F` allocation for `Fixed`, `WorldGrid` (`1³..5³`), and `Infinite` (`64×16×64` `R16UI` lookup + occupancy schedule/evict) passes unit coordinate & tile-conservation oracle tests. |
+| **S15** | `Engine/FluidShaders.js` `AdvectFragment` (`L532–L553`) + `MacCormackFragment` (`L554–L596`) + `InjectFragment` (`L597–L683`) + `ForcesFragment` (`L684–L736`) | `Engine/Shaders/Fluid/{FluidAdvectCompute.slang,FluidMacCormackCompute.slang,FluidInjectCompute.slang,FluidForcesCompute.slang}` | RK2 + Selle 2008 overshoot-fallback MacCormack monotonicity (`600` steps, zero unbounded spin-up), all `3` source shapes + jitter/pulse, and velocity-saturated force response verified against reference step norms. |
+| **S16** | `Engine/FluidShaders.js` `CurlFragment` (`L737–L754`) + `VorticityFragment` (`L755–L779`) + `ThermodynamicsFragment` (`L896–L950`) + `DivergenceFragment` (`L780–L819`) + `PressureFragment` (`L820–L859`) + `GradientFragment` (`L860–L895`) + `ShiftFragment` (`L1000–L1018`) + `OccupancyFragment` (`L1019–L1076`) | `Engine/Shaders/Fluid/{FluidCurlVorticityCompute.slang,FluidThermodynamicsCompute.slang,FluidDivergencePressureCompute.slang,FluidGradientShiftCompute.slang}` + `Engine/SimulationSpace/Fluid/FluidGpuSolver.{h,cpp}` | Ignition `0.9`, expansion `0.08 * state.w`, warm-started Jacobi (`0.96` retain) + screened-diffusion fire light (`6.28`), outflow sponge `mix(0.82, 1.0, keep)`, wall/collider no-penetration (`div < 1e-2`), and `WorldGrid`/`Infinite` relocation pass. |
+| **S17** | `Engine/FluidShaders.js` `SceneFragment` (`L1129–L1384`) + `PostOverlayFragment` (`L1758–L1909`) | `Engine/Shaders/Fluid/{FluidVolumeRaymarch.slang,SimulationPostOverlay.slang}` + `Engine/SimulationSpace/Fluid/{FluidVolumeRenderer.{h,cpp},FluidSimulationPostOverlay.{h,cpp}}` | Wrenninge 3-octave scattering, 2-lobe HG, `1.35`-growth sun shadows, powder darkening, fire-lit smoke/floor, ACES tone transform, transparent flipbook bake, plus Heat Shimmer (`109`), Glitch (`217`), and Distortion (`218`) match `01_Startup_DefaultCampfire.png`. |
+| **S18** | `Engine/FluidShaders.js` `VectorVertex` (`L1385–L1422`) + `SliceVertex`/`Fragment` (`L1492–L1548`) + `TracerUpdate`/`Render` (`L951–L999`, `L1549–L1588`) + `DebrisUpdate`/`Render` (`L1589–L1740`) + `Engine/VolumeRenderer.js` gizmos (`L995–L1166`) + `Engine/SimulationCheckpoints.js` (`L1–L197`) + `Engine/PresetScenes.js` (`54` presets) | `Engine/Shaders/Fluid/{FluidTracerDebrisCompute.slang,FluidOverlayRasterization.slang}` + `Engine/SimulationSpace/EffectLayers/SimulationCheckpointRing.{h,cpp}` + `Engine/SimulationSpace/Fluid/FluidPresetRegistry.{h,cpp}` + `Exhibits/FluidSolverValidation.cpp` | `FluidSolverValidation` passes `100%`: all `54` `Presets/*.toml` load & step cleanly, `8,192` tracers & debris verified, `192 MiB` checkpoint ring rewind/scrub verified, `06_Fluid_InfiniteSparseGrid.png` parity verified, flipbook transparent PNG sheet exported. |
+
+### Stage E — Phase 4: Pure 1:1 Workspace UI via `Engine/Components/`
+
+| Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
+| :---: | :--- | :--- | :--- |
+| **S19** | `Engine/FluidStudioApp.js` (`L1–L1729`) + `Engine/SceneFolders.js` (`L1–L1110`) | `Engine/Workspaces/Fluid/FluidWorkspaceSession.{h,cpp}` | Full headless scene session (selection, undo/redo checkpoints, playback, preset/template loading, gizmo drag state) compiles and passes session unit assertions. |
+| **S20** | `UI/StudioPanels.js` Outliner + Toolbar (`L1–L800`, `L2455–L2645`) | `Engine/Workspaces/Fluid/FluidOutlinerAdapter.{h,cpp}` (drives existing `OutlinerPanel` & `ViewportPanel`) | 6 typed collections, inline eye/enable/delete buttons, 2-row toolbar match `01_Startup_DefaultCampfire.png`. |
+| **S21** | `UI/StudioPanels.js` Inspector + Layer Stack Editor (`L801–L2454`) | `Engine/Workspaces/Fluid/FluidInspectorRouter.{h,cpp}` (drives existing `InspectorPanel` + `Engine/Components/Controls/`) | Paged lettered pill tabs (`‹` / `›` + `1 / N`), XYZ transform table, phase-ordered `EffectLayerStack` editor (`101–109`, `201–219`), inline key diamonds, and `ColourRampEditor` match `02_Inspector_GasDomainStack.png` & `03_Inspector_ForceModels.png`. |
+| **S22** | `UI/StudioPanels.js` Drawer (`L2646–L3145`) + `UI/PreviewThumbnails.js` (`L1–L956`) + `UI/TimelinePanel.js` (`L1–L539`) | `Engine/Workspaces/Fluid/{FluidDrawerPanel.{h,cpp},FluidTimelineAdapter.{h,cpp},FluidWorkspaceExtension.{h,cpp}}` | Bottom slide drawer (`54` Scenes, `71` Templates, `20` Forces, Flipbook) + Timeline (`SimulationTimelineFooter`, `SimulationTimeRuler`, key diamond edit, Ease/Extrapolation) + `F3 Simulation` telemetry tab match `07_Drawer_PresetsTemplates.png` & `08_Timeline_KeyTracks.png`. |
+| **S23** | Full side-by-side HTML vs. Native Parity Sign-Off | `Exhibits/FluidWorkspaceUiValidation.cpp` | **🧱 HARD PARITY WALL**: All `8` Step 0 HTML reference PNGs compared side-by-side against native renders; `ForceFieldValidation`, `ParticleGpuPhysicsValidation` (1:1), `FluidSolverValidation`, and `FluidWorkspaceUiValidation` all `100%` green. |
+
+---
+
+### Stage F — Additive Frontier GPU Physics Extensions (ONLY AFTER `S23` Wall Passes!)
+
+> Strictly opt-in via Frontier additive layer codes **`220` (GPU Orthotropic XPBD)** and **`221` (GPU Particle Collisions)**. Leaving both disabled guarantees bit-identical `1:1` behavior on all `54` HTML presets and `71` HTML templates.
+
+| Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
+| :---: | :--- | :--- | :--- |
+| **S24** | Existing `Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.{h,cpp}` (`80`-byte `RigidColliderProxy` SSBO) + `FluidShaders.js` `ColliderChunk` (`L494–L514`) | `Engine/Shaders/ParticleSpace/ParticleCollisionCompute.slang` + `ForceFieldPhysicsCoupling` two-way impulse readback | Particles bounce with restitution + Coulomb friction + surface velocity off live Jolt `Sphere`, `OrientedBox`, `Capsule`, and baked `CompoundHull` SDFs; atomic impulse readback deflects dynamic Jolt rigid bodies on `PhysicsThread`. |
+| **S25** | Uniform 3D Spatial-Hash Grid (`CountCells` → Blelloch `PrefixSum` → `Scatter` → `Resolve27Neighbors`) | `Engine/Shaders/ParticleSpace/ParticleSpatialHashCompute.slang` | `10,000+` colliding spheres settle under gravity in a box with `< 1%` overlap, exact momentum/friction response, and `0` NaNs over `300` steps. |
+| **S26** | `Experimental/ClothEditor/Engine/WebGpuClothAccelerator.js` (`L9–L100` `packGpuNetworkTables`, `L201–L435` `predictInertia`/`resetXpbdDuals`/`solveXpbdSeamBatch`/`solveXpbdFaceBatch`/`solveXpbdHingeBatch`, `L609–L653` `finalizeSubstep`) | `Engine/ParticleSpace/ParticleXpbdNetworkBuilder.{h,cpp}` + `Engine/Shaders/ParticleSpace/ParticleXpbdCompute.slang` | Conflict-colored zero-atomic GPU XPBD matches `ClothEditor` reference XPBD vertex positions on a pinned `16×16` orthotropic `ClothGrid` under gravity + wind (`< 1e-3`), plus stable `Spiderweb` / `CablesChains` / `FloraBed` strands over `4` substeps × `16` iterations + unilateral contact against Jolt `RigidColliderProxy`. |
+| **S27** | `LayerSpecifications.toml` additive codes `220` & `221` + UI controls in `FluidInspectorRouter` | `EngineContent/Simulation/LayerSpecifications.toml` + `ParticleGpuPhysicsValidation.cpp` (full GPU physics suites) | `ParticleGpuPhysicsValidation` passes `100%` (both all `71` 1:1 HTML templates unchanged AND new XPBD Cloth/Web + Jolt two-way + spatial-hash self-collision suites). |
+| **S28** | Phase 5 Codecs & End-to-End Integration | `Engine/Codecs/Simulation/{ForceFieldCodec,FluidGridCodec,ParticleSpaceCodec}.{h,cpp}` + `CMakeLists.txt` + `EditorLifecycle.cpp` | `.ForceField`, `.FluidGrid`, `.VolumetricSpace`, and `.ParticleSpace` round-trip byte-identical; zero `BannedWordsVocabulary.md` / `And` violations across all added files; all 4 new `CTest` validation executables + existing physics/engine suites green. |
