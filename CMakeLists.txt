@@ -562,6 +562,38 @@ frontier_compile_vector_slang_shader(VectorPbrSurfaceCompute.slang ComputeEntry 
 frontier_compile_vector_slang_shader(VectorGuideOverlay.slang      VertexEntry   vertex   VectorGuideOverlay.vert.spv)
 frontier_compile_vector_slang_shader(VectorGuideOverlay.slang      FragmentEntry fragment VectorGuideOverlay.frag.spv)
 
+function(frontier_compile_forcefield_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${IN_SLANG}"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields"
+            -I "${FRONTIER_SHADER_SRC_DIR}"
+            -target spirv
+            -profile spirv_1_3
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceFieldNoise.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceModelEvaluation.slang"
+        COMMENT "[Slang] Compiling ForceFields/${SLANG_REL_PATH} (${SHADER_UNIT}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_forcefield_slang_shader(ForceFieldOverlayRasterization.slang ForceGizmoVertexEntry    vertex   ForceFieldGizmoOverlay.vert.spv)
+frontier_compile_forcefield_slang_shader(ForceFieldOverlayRasterization.slang ForceVectorVertexEntry   vertex   ForceFieldVectorOverlay.vert.spv)
+frontier_compile_forcefield_slang_shader(ForceFieldOverlayRasterization.slang ForceOverlayFragmentEntry fragment ForceFieldOverlay.frag.spv)
+
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
     set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
@@ -947,8 +979,11 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/ForceFields/ForceModelRegistry.cpp
     Engine/SimulationSpace/ForceFields/ForceFieldSampler.cpp
     Engine/SimulationSpace/ForceFields/KeyTrackSampler.cpp
+    Engine/SimulationSpace/ForceFields/ForceFieldRegister.cpp
+    Engine/SimulationSpace/ForceFields/ForceFieldGpuUploader.cpp
     Engine/SimulationSpace/EffectLayers/EffectLayerSpecification.cpp
     Engine/SimulationSpace/EffectLayers/EffectLayerStack.cpp
+    Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
     Engine/SimulationSpace/PhysicsSpace/CollisionDetection.cpp
@@ -1246,6 +1281,8 @@ if(BUILD_TESTING)
     frontier_register_exhibit(ComponentClassPhysicsValidation           Exhibits/ComponentClassPhysicsValidation.cpp)
     frontier_register_exhibit(CrossThreadConstraintValidation           Exhibits/CrossThreadConstraintValidation.cpp)
     frontier_register_exhibit(ControlVehiclePhysicsValidation           Exhibits/ControlVehiclePhysicsValidation.cpp)
+    frontier_register_exhibit(ForceFieldValidation                      Exhibits/ForceFieldValidation.cpp)
+    target_compile_definitions(ForceFieldValidation PRIVATE FRONTIER_FORCEFIELD_WITH_LIVE_JOLT=1)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)
