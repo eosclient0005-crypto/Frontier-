@@ -107,6 +107,8 @@ struct SketcherRepeat
     double                      Depth     = 0.0;                                             // [len] - Inset depth (Amount = inset distance)
 };
 
+struct SketcherProjectBrowserSession;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    STRUCTS
 //------------------------------------------------------------------------------------------------------------------------
@@ -915,6 +917,7 @@ private:
 struct SketcherWorkspaceStatus
 {
     bool SurfaceTraceEnabled = false;
+    bool SurfaceConformEnabled = true;
     bool DrawingCurveSnap = true;
     bool DrawingAutoSplit = true;
     bool DrawingAutoSurface = true;
@@ -975,6 +978,7 @@ struct SketcherWorkspaceStatus
     SketcherDeviationPlot                  Deviation      = {};                               // [-]   - Cached per document revision
     bool                                  ImagePlanesEnabled = true;                         // [-]   - Blueprint image planes drawn (toolbar Images)
     std::string                           FocusedImage       = {};                           // [-]   - Image plane picked in the Outliner (its Inspector rows open)
+    std::string                           FocusedReference   = {};                           // [-]   - Blender reference surface picked in the Outliner
     int                                   RingPicks          = 0;                            // [-]   - Alt / Alt+Shift edge picks (script evidence)
     SketcherPictureShelf                  Pictures       = {};                               // [-]   - Decoded image-plane pictures (frame-owned)
     SketcherMatcapShelf                   Matcaps        = {};                               // [-]   - Matcap library + thumbnails + M picker
@@ -1051,6 +1055,8 @@ struct SketcherWorkspaceStatus
     std::string                           EdgeGroupVariable = {};                            // [-]   - Optional variable bound to edge weight
     int                                   AddModifierKind   = 0;                             // [-]   - Selected ModifierCategory in '+ Add Modifier'
     bool                                  DimensionsEnabled = true;                          // [-]   - Persistent CAD dimension lines overlay
+    bool                                  ProjectBrowserOpen = false;                        // [-]   - In-app SolidArc Project Browser overlay open
+    std::shared_ptr<SketcherProjectBrowserSession> ProjectBrowser = {};                      // [-]   - In-app PC filesystem & CAD preview browser state
 };
 
 //------------------------------------------------------------------------------------------------------------------------

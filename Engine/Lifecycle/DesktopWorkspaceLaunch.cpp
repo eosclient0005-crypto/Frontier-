@@ -1159,12 +1159,17 @@ int LaunchDesktopWorkspace(
                 }
                 else if (Directive.TargetWorkspace == Workspaces::HostWorkspaceTarget::SketcherWorkspace)
                 {
+                    const bool AlreadyInitialized = SketcherHostReady;
                     if (!Directive.SelectedFilePath.empty())
                     {
                         InitialOptions.StartupImportPath = Directive.SelectedFilePath;
                     }
                     if (EnsureSketcherHostReady())
                     {
+                        if (AlreadyInitialized && !Directive.SelectedFilePath.empty() && SketcherHostPtr)
+                        {
+                            (void)SketcherHostPtr->OpenDocumentPath(Directive.SelectedFilePath.string());
+                        }
                         CurrentSurface = ActiveHostSurface::SketcherWorkspaceSurface;
                     }
                 }
@@ -1725,7 +1730,14 @@ int LaunchDesktopWorkspace(
                 WorkspaceAppearance::AppendOverlayPointerShield(StandaloneControlCentre.QueryTabPhysicalBounds());
             }
             SketcherHostPtr->BeginFrame(Dt);
-            SketcherDockPtr->PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
+            if (SketcherHostPtr->QueryViewportMaximized())
+            {
+                SketcherHostPtr->RenderFullscreenViewport(FullBounds.Width, FullBounds.Height);
+            }
+            else
+            {
+                SketcherDockPtr->PresentWindowImGuiPanes(Components::HostWindowToken{ 0u });
+            }
             SketcherHostPtr->EndFrame(Dt, true, true);
             WorkspaceAppearance::ClearOverlayPointerShield();
             SketcherBrowserPtr->Render(FullBounds, Dt, HostUiScale);

@@ -13,7 +13,9 @@
 #include "Engine/Workspaces/ParametricSketcher/Interface/SketcherNavigation.h"
 #include "Engine/Workspaces/ParametricSketcher/Interface/SketcherOperationInput.h"
 #include "Engine/Workspaces/ParametricSketcher/Interface/SketcherOutliner.h"
+#include "Engine/Workspaces/ParametricSketcher/Interface/SketcherProjectBrowser.h"
 #include "Engine/Workspaces/ParametricSketcher/Interface/SketcherStyleSheet.h"
+#include "Engine/Components/Appearance/TypographyRepository.h"
 #include "Engine/Components/Panes/WorkspaceAppearance.h"
 
 #include "Engine/GeometrySpace/Parametric/Diagnostics/OperationTrace.h"
@@ -253,8 +255,10 @@ constexpr float CardHeadingHeight = 17.0f * SketcherStyleTokens::FontScale + 13.
 void DrawCardHeading(SketcherSheet& Sheet, float Left, float Top, float Width, const char* Title, const char* Tag)
 {
     const float Centre = Top + 0.5f * 17.0f * SketcherStyleTokens::FontScale;
-    Sheet.Text(Left, Centre, 17.0f, SketcherInk(0xeeeeee), Title);
-    if (Tag && *Tag) Sheet.TextRight(Left + Width, Centre, 8.0f, SketcherInk(0x777777), Tag, SketcherWeight::Light, 1.0f);
+    float TagW = 0.0f;
+    if (Tag && *Tag) TagW = Sheet.TextRight(Left + Width, Centre, 8.0f, SketcherInk(0x808080), Tag, SketcherWeight::Light, 0.9f) + 8.0f;
+    const float TitleMaxW = std::max(24.0f, Width - TagW);
+    Sheet.TextClipped(Left, Centre, TitleMaxW, 16.0f, SketcherInk(0xeeeeee), Title, SketcherWeight::Regular);
 }
 
 void BeginCard(const char* Title, const char* Tag = nullptr)
@@ -350,8 +354,29 @@ void AdoptDocument(SketcherWorkspaceStatus& State, SketcherDocument Document, bo
     State.Outliner.AnchorKey = {};
     State.Document           = std::move(Document);
     State.FocusedStep        = {};
+    State.FocusedReference   = State.Document.ReferenceSurfaces.empty() ? std::string{} : State.Document.ReferenceSurfaces.front().Name;
     RefreshSketcherScene(State, false);
-    if (FitCondition && !State.Scene.Faces.empty()) FitSketcherCamera(State.Camera, State.Scene);
+    if (FitCondition)
+    {
+        if (!State.Scene.Faces.empty())
+        {
+            FitSketcherCamera(State.Camera, State.Scene);
+        }
+        else if (!State.Document.ReferenceSurfaces.empty())
+        {
+            std::array<double, 3> Low  {  1.0e30,  1.0e30,  1.0e30 };
+            std::array<double, 3> High { -1.0e30, -1.0e30, -1.0e30 };
+            bool AnyRef = false;
+            for (const SketcherReferenceSurface& Surf : State.Document.ReferenceSurfaces)
+            {
+                if (!Surf.Geometry || Surf.Geometry->Corners.empty()) continue;
+                for (int A = 0; A < 3; ++A) { Low[A] = std::min(Low[A], Surf.MinBound[A]); High[A] = std::max(High[A], Surf.MaxBound[A]); }
+                AnyRef = true;
+            }
+            if (AnyRef) Frontier::FitOrbitCamera(State.Camera, Low, High);
+            if (State.Document.Tree.Steps.empty()) State.SurfaceTraceEnabled = true;
+        }
+    }
 }
 
 bool OpenDocument(SketcherWorkspaceStatus& State, const std::string& Path, bool AdoptPathCondition)
@@ -363,16 +388,29 @@ bool OpenDocument(SketcherWorkspaceStatus& State, const std::string& Path, bool 
         return false;
     }
     SketcherDocument Document = CreateSketcherDocument(File.Title);
-    Document.Tree     = File.Tree;
-    Document.Captions = File.Captions;
-    Document.ImagePlanes = File.ImagePlanes;
-    Document.Appearance  = File.Appearance;
-    Document.DrawingSheet = File.DrawingSheet;
-    Document.Dimensions   = File.Dimensions;
+    Document.Tree              = File.Tree;
+    Document.Captions          = File.Captions;
+    Document.ImagePlanes       = File.ImagePlanes;
+    Document.ReferenceSurfaces = File.ReferenceSurfaces;
+    Document.ReferenceRevision = Document.ReferenceSurfaces.empty() ? 0u : 1u;
+    Document.PreviewPngBytes   = File.PreviewPngBytes;
+    Document.Appearance        = File.Appearance;
+    Document.DrawingSheet      = File.DrawingSheet;
+    Document.Dimensions        = File.Dimensions;
     RegenerateSketcherDocument(Document, true);
     AdoptDocument(State, std::move(Document), true);
     if (AdoptPathCondition) State.DocumentPath = Path;
-    Announce(State, Compose("Opened %s · %d steps", Path.c_str(), int(State.Document.Tree.Steps.size())));
+    if (!State.Document.ReferenceSurfaces.empty())
+    {
+        Announce(State, Compose("Opened %s · %d steps · %zu reference%s",
+            Path.c_str(), int(State.Document.Tree.Steps.size()),
+            State.Document.ReferenceSurfaces.size(),
+            State.Document.ReferenceSurfaces.size() == 1u ? "" : "s"));
+    }
+    else
+    {
+        Announce(State, Compose("Opened %s · %d steps", Path.c_str(), int(State.Document.Tree.Steps.size())));
+    }
     return true;
 }
 
@@ -571,12 +609,13 @@ void DrawAppearanceCard(SketcherWorkspaceStatus& State)
     const std::string Caption = Shown == "mixed" ? std::string("mixed") : Layer < State.Matcaps.Library.Captions.size() ? State.Matcaps.Library.Captions[Layer] : Shown;
     const size_t Bodies  = State.Document.Selection.Bodies.size();
     const SketcherAppearance& Appearance = State.Document.Appearance;
-    if (Faces) ImGui::Text("%zu face(s) · %s", Faces, Caption.c_str());
-    else if (Bodies) ImGui::Text("%zu body(ies) · %s", Bodies, Caption.c_str());
-    else ImGui::Text("%s · %s", State.Document.Summary.Bodies.size() > 1 ? "Default" : "Body", Caption.c_str());
-    ImGui::SameLine();
-    if (Appearance.BodyMatcaps.empty()) ImGui::TextDisabled("· %zu override(s)", Appearance.FaceMatcaps.size());
-    else ImGui::TextDisabled("· %zu body + %zu face override(s)", Appearance.BodyMatcaps.size(), Appearance.FaceMatcaps.size());
+    std::string HeadLine;
+    if (Faces) HeadLine = Compose("%zu face(s) · %s", Faces, Caption.c_str());
+    else if (Bodies) HeadLine = Compose("%zu body(ies) · %s", Bodies, Caption.c_str());
+    else HeadLine = Compose("%s · %s", State.Document.Summary.Bodies.size() > 1 ? "Default" : "Body", Caption.c_str());
+    if (Appearance.BodyMatcaps.empty()) HeadLine += Compose(" · %zu override(s)", Appearance.FaceMatcaps.size());
+    else HeadLine += Compose(" · %zu body + %zu face override(s)", Appearance.BodyMatcaps.size(), Appearance.FaceMatcaps.size());
+    ImGui::TextWrapped("%s", HeadLine.c_str());
     const std::string Chosen = DrawMatcapSwatches(State, "Matcap", 0, 26.0f, false);
     if (!Chosen.empty()) AssignMatcap(State, Chosen);
     const float Spacing = ImGui::GetStyle().ItemSpacing.x;
@@ -1576,7 +1615,7 @@ bool IntersectSketchPlane(const OrbitCameraBasis& Frame, ImVec2 Local, const Ort
     if (Drawing.Kind == SketcherDrawingCategory::Curve) Caption += std::string(" · ") + SketchSplineFormLabel(Drawing.Form);
     if (Drawing.Kind == SketcherDrawingCategory::Rectangle) Caption += Drawing.CentreCondition ? " · centre" : " · corner";
     if (Drawing.Kind == SketcherDrawingCategory::Circle) Caption += Drawing.CentreCondition ? " · centre" : " · two-point";
-    if (Drawing.SurfaceCondition) Caption += " · SURFACE POINTS → no added controls";
+    if (Drawing.SurfaceCondition) Caption += " · SURFACE TRACE";
     else if (Drawing.FacePlaneCondition) Caption += Drawing.FaceName.empty() ? std::string(" · level with the snap") : " · on face " + Drawing.FaceName;
     return Caption;
 }
@@ -1605,7 +1644,10 @@ void OpenDrawingSession(SketcherWorkspaceStatus& State, SketcherDrawingCategory 
     State.Drawing.Form            = SurfaceTrace ? SketchSplineForm::Nurbs : Form;
     if (State.Drawing.SurfaceCondition)
     {
-        Announce(State, "SURFACE TRACE · click on the model · Ctrl: authored curve / model edge (12 px) · Enter: finish · Esc: cancel · only clicked controls are saved; spans are NOT surface-projected");
+        const bool ConformActive = State.SurfaceConformEnabled && !State.Document.ReferenceSurfaces.empty();
+        Announce(State, ConformActive
+            ? "SURFACE TRACE · click on the model · spans conform to reference mesh & auto-cut crossings · Ctrl: authored curve / edge · Enter: finish · Esc: cancel"
+            : "SURFACE TRACE · click on the model · Ctrl: authored curve / model edge (12 px) · Enter: finish · Esc: cancel · clicked controls only");
         return;
     }
     static const char* Hints[] = { "click points · click the first point closes · Enter / right-click finishes open · Ctrl+Z drops a point",
@@ -1631,7 +1673,7 @@ void CancelDrawingSession(SketcherWorkspaceStatus& State)
 // when PointerCondition; empty when every point lies on the plane (a planar sketch).
 [[nodiscard]] std::vector<Vector3> LiftedDrawingPoints(const SketcherDrawingSession& Drawing, bool PointerCondition)
 {
-    if ((Drawing.Kind != SketcherDrawingCategory::Curve && !Drawing.SurfaceCondition) || Drawing.SolidCondition) return {};
+    if ((Drawing.Kind != SketcherDrawingCategory::Curve && Drawing.Kind != SketcherDrawingCategory::Line && !Drawing.SurfaceCondition) || Drawing.SolidCondition) return {};
     const bool Pointer = PointerCondition && DrawingPointerLive(Drawing);
     bool       Any     = Pointer && Drawing.PointerLifted.has_value();
     for (size_t Index = 0; Index < Drawing.Lifted.size() && Index < Drawing.Points.size(); ++Index) Any = Any || Drawing.Lifted[Index].has_value();
@@ -1668,12 +1710,15 @@ void FinishDrawingSession(SketcherWorkspaceStatus& State, bool ClosedCondition)
     const bool RepeatSegment = Drawing.SegmentCondition;
     const SketchSplineForm RepeatForm = Drawing.Form;
     const int RepeatSides = Drawing.Sides;
-    if (Drawing.SurfaceCondition || (State.DrawingAutoSplit && Drawing.Kind==SketcherDrawingCategory::Curve &&
-        (Drawing.Form==SketchSplineForm::Nurbs || Drawing.Form==SketchSplineForm::Bezier)))
+    if (Drawing.SurfaceCondition || (State.DrawingAutoSplit && !KnifeCondition &&
+        (Drawing.Kind == SketcherDrawingCategory::Curve || Drawing.Kind == SketcherDrawingCategory::Line)))
     {
         auto Controls=LiftedDrawingPoints(Drawing,false);
         if(Controls.empty()) for(auto P:Drawing.Points) Controls.push_back(PlacePlanePoint(DrawingPlane(Drawing),P));
-        const auto Trace = MakeSketcherControlTrace(Controls, Drawing.Kind, Drawing.Form, ClosedCondition);
+        const bool ConformToReference = Drawing.SurfaceCondition && State.SurfaceConformEnabled && !State.Document.ReferenceSurfaces.empty();
+        const auto Trace = ConformToReference
+            ? ConstructReferenceConformingTrace(State.Document, Controls, Drawing.Kind, Drawing.Form, ClosedCondition)
+            : MakeSketcherControlTrace(Controls, Drawing.Kind, Drawing.Form, ClosedCondition);
         if (!Trace.Refusal.empty()) { Drawing.Refusal = Legible(Trace.Refusal); Announce(State, Drawing.Refusal); return; }
         const SketcherCommandOutcome Outcome = Trace.Arc ? DrawSketcherSketch(State.Document, *Trace.Arc) : DrawSketcherProjectedCurve(State.Document, Trace.Curve, ClosedCondition, State.DrawingAutoSplit, State.DrawingIntersectionTolerance, State.DrawingAutoSurface);
         if (Outcome.AcceptedCondition)
@@ -1684,7 +1729,9 @@ void FinishDrawingSession(SketcherWorkspaceStatus& State, bool ClosedCondition)
         Conclude(State, Outcome);
         if (Outcome.AcceptedCondition)
         {
-            Announce(State, Compose("Surface-point trace · %zu placed controls · no automatic points or surface fitting", Drawing.Points.size()));
+            Announce(State, ConformToReference
+                ? Compose("Surface-conformed trace · %zu clicked controls · auto-split crossings active", Drawing.Points.size())
+                : Compose("Surface-point trace · %zu placed controls · auto-split crossings active", Drawing.Points.size()));
             RearmSketchTool(State, RepeatKind, RepeatCentre, RepeatSegment, RepeatForm, RepeatSides);
         }
         return;
@@ -2016,7 +2063,7 @@ void PlaceDrawingPointer(SketcherWorkspaceStatus& State, const OrbitCameraBasis&
             if(Drawing.Kind==SketcherDrawingCategory::Arc && Drawing.Points.empty())Drawing.Elevation=Dot(Hit.Position,SketcherSketchPlane(Drawing.GridPlane).ZAxis);
             const auto ActivePlane=DrawingPlane(Drawing);auto Delta=Hit.Position-ActivePlane.Origin;
             Point={Dot(Delta,ActivePlane.XAxis),Dot(Delta,ActivePlane.YAxis)};
-            if(Drawing.Kind==SketcherDrawingCategory::Curve || Drawing.SurfaceCondition)Drawing.PointerLifted=Hit.Position;
+            if(Drawing.Kind==SketcherDrawingCategory::Curve || Drawing.SurfaceCondition || (State.DrawingAutoSplit && Drawing.Kind==SketcherDrawingCategory::Line))Drawing.PointerLifted=Hit.Position;
             else {Hit.Position=PlacePlanePoint(ActivePlane,Point);if(std::abs(Dot(Delta,ActivePlane.ZAxis))>1e-6)Hit.Source+=" (projected to drawing plane)";}
             Picker.Current=Hit;return;
         }
@@ -13041,16 +13088,55 @@ void ExportBodies(SketcherWorkspaceStatus& State, const std::string& Path)
                             Figures.c_str(), Export.Bytes, Export.Milliseconds));
 }
 
-// Import… dispatches by extension: .step / .stp → bodies, .toml → VehicleCurves.
+// 💡 Import… with a .blend file: native ZSTD/GZIP/raw SDNA reader + modifier stack evaluation (Mirror, Subsurf with
+//    semi-sharp creases, Solidify, Shrinkwrap, Mask, Array, Bevel, Skin, AutoSmooth) uploaded directly to GPU VRAM for
+//    high-poly vehicle retopology and precision curve tracing.
+void ImportBlend(SketcherWorkspaceStatus& State, const std::string& Path)
+{
+    SketcherExchangeSession& Session = State.Exchange;
+    SketcherBlendImportOptions Options;
+    const SketcherBlendImportReport Report = ImportSketcherBlend(State.Document, Path, Options);
+    Session.ImportPath         = Path;
+    Session.ImportRefusal      = Report.Refusal;
+    Session.ImportSolids       = Report.Refusal.empty() ? int(Report.SourceObjects) : 0;
+    Session.ImportFaces        = Report.Refusal.empty() ? int(Report.OutputTriangles) : 0;
+    Session.ImportRepairs      = Report.Refusal.empty() ? int(Report.EvaluatedModifiers) : 0;
+    Session.ImportMilliseconds = Report.ElapsedMs;
+    if (!Report.Refusal.empty())
+    {
+        Announce(State, "Refused: " + Report.Refusal);
+        return;
+    }
+    ++Session.Imports;
+    if (!State.Document.ReferenceSurfaces.empty())
+    {
+        const SketcherReferenceSurface& Added = State.Document.ReferenceSurfaces.back();
+        State.FocusedReference = Added.Name;
+        State.FocusedImage.clear();
+        const std::array<double, 3> Low  = Added.MinBound;
+        const std::array<double, 3> High = Added.MaxBound;
+        FitOrbitCamera(State.Camera, Low, High);
+        State.Camera.SceneRadius = std::max(State.Camera.SceneRadius,
+            0.5 * std::hypot(High[0] - Low[0], High[1] - Low[1], High[2] - Low[2]));
+        if (State.Document.Tree.Steps.empty()) State.SurfaceTraceEnabled = true;
+    }
+    RefreshSketcherScene(State, true);
+    Announce(State, Compose("Imported %s (Blender %s) · %u parts · %u GPU tris · %u modifiers · %.0f ms · Surface Trace ready",
+                            Path.c_str(), Report.BlenderVersion.c_str(), Report.SourceObjects, Report.OutputTriangles,
+                            Report.EvaluatedModifiers, Report.ElapsedMs));
+}
+
+// Import… dispatches by extension: .step / .stp → bodies, .blend → GPU reference vehicle, .toml → VehicleCurves.
 void ImportFile(SketcherWorkspaceStatus& State, const std::string& Path)
 {
     const SketcherExchangeFormat Format = SketcherExchangeFormatOf(Path);
     if (Format == SketcherExchangeFormat::Step) ImportStep(State, Path);
+    else if (Format == SketcherExchangeFormat::Blend) ImportBlend(State, Path);
     else if (Format == SketcherExchangeFormat::Toml) ImportCurves(State, Path);
     else
     {
         State.Exchange.ImportPath    = Path;
-        State.Exchange.ImportRefusal = "Import: " + Path + " is neither .step / .stp nor a VehicleCurves .toml";
+        State.Exchange.ImportRefusal = "Import: " + Path + " is not a supported .blend, .step / .stp, or .toml file";
         Announce(State, "Refused: " + State.Exchange.ImportRefusal);
     }
 }
@@ -13614,15 +13700,24 @@ void DrawPathPopups(SketcherWorkspaceStatus& State)
         if (ImGui::BeginPopupModal(Title, nullptr, ImGuiWindowFlags_AlwaysAutoResize))
         {
             const size_t ExportCount = SketcherExportBodies(State.Document).size();
-            const std::string Prompt = ImportCondition ? std::string("Import a STEP (.step / .stp), reference image (.ImageSpace / .png / .jpg), or curves (.toml)")
+            const std::string Prompt = ImportCondition ? std::string("Import a Blender vehicle (.blend), STEP (.step / .stp), reference image (.ImageSpace / .png / .jpg), or curves (.toml)")
                                      : ExportCondition ? Compose("Export %d %s body(ies) in millimetres: .step / .stp (STEP AP214, exact B-rep) or .stl (binary facets)", int(ExportCount),
                                                                  State.Document.Selection.Bodies.empty() ? "shown" : "selected")
-                                     : OpenCondition   ? std::string("Open a .solidarc document (a .step / .stp file is imported into this one)")
+                                     : OpenCondition   ? std::string("Open a .solidarc document (a .step / .stp or .blend file is imported into this one)")
                                                        : std::string("Save the document as .solidarc (.step / .stp / .stl exports the bodies instead)");
             ImGui::TextUnformatted(Prompt.c_str());
             ImGui::SetNextItemWidth(420);
             const bool Entered = ImGui::InputText("##Path", State.PathText.data(), State.PathText.size(), ImGuiInputTextFlags_EnterReturnsTrue);
             RegisterWidget(State, "PathField");
+            if (ImportCondition && SketcherFileDialogAvailableCondition())
+            {
+                ImGui::SameLine();
+                if (PressButton(State, "Browse…###PathBrowse", ImVec2(92, 0)))
+                {
+                    const std::string Chosen = BrowseSketcherImportFile();
+                    if (!Chosen.empty()) std::snprintf(State.PathText.data(), State.PathText.size(), "%s", Chosen.c_str());
+                }
+            }
             if (PressButton(State, ImportCondition ? "Import###PathImport" : ExportCondition ? "Export###PathExport" : OpenCondition ? "Open###PathOpen" : "Save###PathSave", ImVec2(120, 0)) || Entered)
             {
                 const std::string Path = State.PathText.data();
@@ -13630,6 +13725,7 @@ void DrawPathPopups(SketcherWorkspaceStatus& State)
                 if (ImportCondition) (void)IntakeSketcherDroppedFile(State, Path);
                 else if (ExportCondition) ExportBodies(State, Path);
                 else if (OpenCondition && Format == SketcherExchangeFormat::Step) ImportStep(State, Path);
+                else if (OpenCondition && Format == SketcherExchangeFormat::Blend) ImportBlend(State, Path);
                 else if (OpenCondition) OpenDocument(State, Path, true);
                 else if (Format == SketcherExchangeFormat::Step || Format == SketcherExchangeFormat::Stl) ExportBodies(State, Path);
                 else SaveDocument(State, Path);
@@ -13656,6 +13752,21 @@ void DrawPathPopups(SketcherWorkspaceStatus& State)
             Announce(State, "Example: Bracket specimen");
         }
         RegisterWidget(State, "ExampleBracket");
+        ImGui::Separator();
+        ImGui::TextDisabled("Blender Vehicle References (GPU Retopology)");
+        static const struct { const char* Label; const char* RelPath; const char* WidgetId; } VehicleBlends[] = {
+            { "Egoist (.blend) · 47 parts, Mirror + Subdiv + Solidify + Shrinkwrap###ExampleEgoist",         "Content/Geometry/Vehicles/Blends/Egoist.blend",      "ExampleEgoist" },
+            { "Liger (.blend) · 20 parts, Mirror + Subdiv L3 + Creases + Bevel###ExampleLiger",              "Content/Geometry/Vehicles/Blends/Liger.blend",       "ExampleLiger" },
+            { "Quicksilver (.blend) · 47 parts, Mirror + Subdiv L3 + Shrinkwrap###ExampleQuicksilver",       "Content/Geometry/Vehicles/Blends/Quicksilver.blend", "ExampleQuicksilver" },
+        };
+        for (const auto& Vehicle : VehicleBlends)
+        {
+            if (ImGui::Selectable(Vehicle.Label))
+            {
+                ImportBlend(State, Vehicle.RelPath);
+            }
+            RegisterWidget(State, Vehicle.WidgetId);
+        }
         ImGui::EndPopup();
     }
 }
@@ -14427,6 +14538,10 @@ void DrawOutliner(SketcherWorkspaceStatus& State, ImVec2 Position, ImVec2 Size, 
         {
             State.FocusedImage = Fig.Key;
         }
+        else if (Fig.Source == SketcherFigureSource::Reference)
+        {
+            State.FocusedReference = Fig.Key;
+        }
     };
     switch (Intent.Verb)
     {
@@ -14437,6 +14552,14 @@ void DrawOutliner(SketcherWorkspaceStatus& State, ImVec2 Position, ImVec2 Size, 
             State.Outliner.AnchorKey = Intent.Figure.Key;
             Announce(State, State.FocusedImage.empty() ? Intent.Figure.Name + " let go"
                                                        : Intent.Figure.Name + " · Inspector › Image planes: opacity, line art / photo, mirror, crop, width, turn, centre");
+            break;
+        }
+        if (Intent.Figure.Source == SketcherFigureSource::Reference && !Intent.ShiftCondition && !Intent.CtrlCondition)
+        {
+            State.FocusedReference = State.FocusedReference == Intent.Figure.Key ? std::string{} : Intent.Figure.Key;
+            State.Outliner.AnchorKey = Intent.Figure.Key;
+            Announce(State, State.FocusedReference.empty() ? Intent.Figure.Name + " let go"
+                                                           : Intent.Figure.Name + " · Inspector › Blender references: opacity, crease overlay, scale, part toggles · Shift+S traces curves on surface");
             break;
         }
         if (Intent.Figure.LockedCondition)
@@ -14552,15 +14675,40 @@ void DrawOutliner(SketcherWorkspaceStatus& State, ImVec2 Position, ImVec2 Size, 
             State.Outliner.AnchorKey = Intent.Figure.Key;
             break;
         case SketcherFigureSource::Image:
+        case SketcherFigureSource::Reference:
             break;                                                                           // Handled above
         }
         break;
     case SketcherOutlinerVerb::ToggleVisibility:
         if (Intent.Figure.Source == SketcherFigureSource::Image) ToggleImageFigure(State, Intent.Figure.Key, false);
+        else if (Intent.Figure.Source == SketcherFigureSource::Reference)
+        {
+            for (SketcherReferenceSurface& Ref : State.Document.ReferenceSurfaces)
+            {
+                if (Ref.Name == Intent.Figure.Key)
+                {
+                    Ref.VisibleCondition = !Ref.VisibleCondition;
+                    Announce(State, Ref.Name + (Ref.VisibleCondition ? " shown" : " hidden"));
+                    break;
+                }
+            }
+        }
         else ToggleFigureVisibility(State, Intent.Figure);
         break;
     case SketcherOutlinerVerb::ToggleLock:
         if (Intent.Figure.Source == SketcherFigureSource::Image) ToggleImageFigure(State, Intent.Figure.Key, true);
+        else if (Intent.Figure.Source == SketcherFigureSource::Reference)
+        {
+            for (SketcherReferenceSurface& Ref : State.Document.ReferenceSurfaces)
+            {
+                if (Ref.Name == Intent.Figure.Key)
+                {
+                    Ref.LockedCondition = !Ref.LockedCondition;
+                    Announce(State, Ref.Name + (Ref.LockedCondition ? " locked" : " unlocked"));
+                    break;
+                }
+            }
+        }
         else ToggleFigureLock(State, Intent.Figure);
         break;
     case SketcherOutlinerVerb::Construct:
@@ -15167,7 +15315,7 @@ void DrawFileMenu(SketcherWorkspaceStatus& State)
         return Pressed;
     };
     if (Entry("New document###MenuNew", "Ctrl+N")) StartNewDocument(State);
-    if (Entry("Open…###MenuOpen", "Ctrl+O")) State.PopupRequest = "Open document";
+    if (Entry("Open…###MenuOpen", "Ctrl+O")) OpenSketcherProjectBrowser(State);
     if (Entry("Save###MenuSave", "Ctrl+S"))
     {
         if (State.DocumentPath.empty()) State.PopupRequest = "Save document";
@@ -15260,13 +15408,13 @@ float DrawDisplaySelect(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, fl
         if (*Toggle.Enabled) Summary += (Summary.empty() ? "" : " · ") + std::string(Toggle.Label, std::strstr(Toggle.Label, "###"));
     if (Summary.empty()) Summary = "nothing";
     // Compact (a narrow viewport): the layers glyph stands in for the word.
-    const float         Label  = CompactCondition ? 15.0f : Sheet.Measure("Display", 11.0f);   // [px]
+    const float         Label  = CompactCondition ? 15.0f : Sheet.Measure("Display", 11.0f, SketcherWeight::Regular);   // [px]
     const PlaneExtent   Select = Spanning(Left, Centre - 13.0f, 10.0f + Label + 26.0f, 26.0f);
     const SketcherPress Press  = PressSketcherRegion(State.Widgets, "DisplayMenu", Select);
     if (Press.HoveredCondition) Sheet.Box(Select, SketcherInk(0x292929), 13.0f);
-    const ColorQuad Ink = SketcherInk(Press.HoveredCondition ? 0xffffff : 0xa0a0a0);
+    const ColorQuad Ink = SketcherInk(Press.HoveredCondition ? 0xffffff : 0xb8b8b8);
     if (CompactCondition) Sheet.Icon(IconSymbol::SketcherLayers, Select.MinimumX + 7.0f, Centre - 7.5f, 15.0f, Ink);
-    else Sheet.Text(Select.MinimumX + 5.0f, Centre, 11.0f, Ink, "Display");
+    else Sheet.Text(Select.MinimumX + 5.0f, Centre, 11.0f, Ink, "Display", SketcherWeight::Regular);
     SelectChevron(Sheet, Select.MaximumX - 12.0f, Centre, Ink);
     if (Press.ClickedCondition) ImGui::OpenPopup("DisplayMenu");
     bool ListCondition = false;                                                             // The tooltip waits while the list is open
@@ -15287,7 +15435,7 @@ float DrawDisplaySelect(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, fl
 
 float DrawSnapSelect(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, float Left, float Centre, bool CompactCondition = false)
 {
-    const float         Label  = CompactCondition ? 15.0f : Sheet.Measure("Snap", 11.0f);
+    const float         Label  = CompactCondition ? 15.0f : Sheet.Measure("Snap", 11.0f, SketcherWeight::Regular);
     const PlaneExtent   Select = Spanning(Left, Centre - 13.0f, 10.0f + Label + 24.0f, 26.0f);
     const SketcherPress Press  = PressSketcherRegion(State.Widgets, "SnapMenu", Select);
     if (State.Picker.Enabled)
@@ -15298,9 +15446,9 @@ float DrawSnapSelect(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, float
     {
         Sheet.Box(Select, SketcherInk(0x292929), 13.0f);
     }
-    const ColorQuad Ink = SketcherInk(State.Picker.Enabled || Press.HoveredCondition ? 0xffffff : 0xa0a0a0);
+    const ColorQuad Ink = SketcherInk(State.Picker.Enabled || Press.HoveredCondition ? 0xffffff : 0xb8b8b8);
     if (CompactCondition) Sheet.Icon(IconSymbol::SketcherPoints, Select.MinimumX + 7.0f, Centre - 7.5f, 15.0f, Ink);
-    else Sheet.Text(Select.MinimumX + 6.0f, Centre, 11.0f, Ink, "Snap");
+    else Sheet.Text(Select.MinimumX + 6.0f, Centre, 11.0f, Ink, "Snap", SketcherWeight::Regular);
     SelectChevron(Sheet, Select.MaximumX - 11.0f, Centre, Ink);
     if (Press.ClickedCondition) ImGui::OpenPopup("SnapFilterMenu");
     bool ListOpen = false;
@@ -15398,7 +15546,7 @@ void DrawViewportBar(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, const
     else
     {
         Sheet.Icon(IconSymbol::SketcherPlus, Chip.MinimumX + 14.0f, Centre - 7.5f, 15.0f, ChipInk);
-        Sheet.Text(Chip.MinimumX + 14.0f + 15.0f + 9.0f, Centre, 11.0f, ChipInk, "Menu");
+        Sheet.Text(Chip.MinimumX + 14.0f + 15.0f + 9.0f, Centre, 11.0f, ChipInk, "Menu", SketcherWeight::Regular);
     }
     if (Construct.ClickedCondition) { State.ConstructMenuAtPointer = false; State.ConstructMenuRequest = true; }
     Cursor = Chip.MaximumX + 4.0f;
@@ -15413,8 +15561,8 @@ void DrawViewportBar(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, const
         const PlaneExtent   Select = Spanning(Cursor, Centre - 13.0f, Stage >= 4 ? 70.0f : 98.0f, 26.0f);
         const SketcherPress View   = PressSketcherRegion(State.Widgets, "ViewMenu", Select);
         if (View.HoveredCondition) Sheet.Box(Select, SketcherInk(0x292929), 13.0f);
-        const ColorQuad ViewInk = SketcherInk(View.HoveredCondition ? 0xffffff : 0xa0a0a0);
-        Sheet.Text(Select.MinimumX + 5.0f, Centre, 11.0f, ViewInk, CurrentViewLabel(State.Camera));
+        const ColorQuad ViewInk = SketcherInk(View.HoveredCondition ? 0xffffff : 0xb8b8b8);
+        Sheet.Text(Select.MinimumX + 5.0f, Centre, 11.0f, ViewInk, CurrentViewLabel(State.Camera), SketcherWeight::Regular);
         SelectChevron(Sheet, Select.MaximumX - 12.0f, Centre, ViewInk);
         if (View.ClickedCondition) ImGui::OpenPopup("ViewMenu");
         if (BeginSelectList("ViewMenu", ImVec2(Select.MinimumX, Select.MaximumY + 4.0f)))
@@ -15450,7 +15598,7 @@ void DrawViewportBar(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, const
         else if (DimPress.HoveredCondition)
             Sheet.Box(DimBox, SketcherInk(0x292929), 13.0f);
         Sheet.Text(DimBox.MinimumX + 8.0f, Centre, 11.0f,
-                   SketcherInk(State.DimensionsEnabled || DimPress.HoveredCondition ? 0xffffff : 0x767676), "Dim");
+                   SketcherInk(State.DimensionsEnabled || DimPress.HoveredCondition ? 0xffffff : 0x989898), "Dim", SketcherWeight::Regular);
         if (DimPress.HoveredCondition)
             ImGui::SetTooltip("Show / hide dimension lines in viewport (D or bottom Dim tool places new dimensions)");
         if (DimPress.ClickedCondition)
@@ -15531,13 +15679,40 @@ void DrawViewportBar(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, const
         }
     }
 
-    // Right end, right to left: maximize, fit, edges (28 px icon buttons, gap 4), then the projection button.
+    // Right end, right to left: maximize (fullscreen), fit, edges (28 px icon buttons, gap 4), then the projection button.
     float Right = Bar.MaximumX - 12.0f;
-    if (SheetIconButton(State, Sheet, "ViewportMaximize", Right - 14.0f, Centre, 28.0f, IconSymbol::SketcherMaximize, 18.0f, 0, true, State.ViewportMaximizedEnabled))
-        State.ViewportMaximizedEnabled = !State.ViewportMaximizedEnabled;
+    {
+        const bool MaxPressed = SheetIconButton(State, Sheet, "ViewportMaximize", Right - 14.0f, Centre, 28.0f, IconSymbol::SketcherMaximize, 18.0f, 0, true, State.ViewportMaximizedEnabled);
+        const ImVec2 Mouse = ImGui::GetIO().MousePos;
+        if (std::fabs(Mouse.x - (Right - 14.0f)) <= 14.0f && std::fabs(Mouse.y - Centre) <= 14.0f)
+            ImGui::SetTooltip(State.ViewportMaximizedEnabled ? "Exit fullscreen viewport (F11 / Ctrl+Space)" : "Fullscreen viewport (F11 / Ctrl+Space)");
+        if (MaxPressed)
+        {
+            State.ViewportMaximizedEnabled = !State.ViewportMaximizedEnabled;
+            Announce(State, State.ViewportMaximizedEnabled ? "Viewport fullscreen ON (F11 or Ctrl+Space to exit)" : "Viewport fullscreen OFF");
+        }
+    }
     Right -= 28.0f + 4.0f;
-    if (SheetIconButton(State, Sheet, "FitView", Right - 14.0f, Centre, 28.0f, IconSymbol::SketcherFocus, 18.0f) && !State.Scene.Faces.empty())
-        FitSketcherCamera(State.Camera, State.Scene);
+    if (SheetIconButton(State, Sheet, "FitView", Right - 14.0f, Centre, 28.0f, IconSymbol::SketcherFocus, 18.0f))
+    {
+        if (!State.Scene.Faces.empty())
+        {
+            FitSketcherCamera(State.Camera, State.Scene);
+        }
+        else if (!State.Document.ReferenceSurfaces.empty())
+        {
+            std::array<double, 3> Low  {  1.0e30,  1.0e30,  1.0e30 };
+            std::array<double, 3> High { -1.0e30, -1.0e30, -1.0e30 };
+            bool AnyRef = false;
+            for (const SketcherReferenceSurface& Surf : State.Document.ReferenceSurfaces)
+            {
+                if (!Surf.VisibleCondition || !Surf.Geometry || Surf.Geometry->Corners.empty()) continue;
+                for (int A = 0; A < 3; ++A) { Low[A] = std::min(Low[A], Surf.MinBound[A]); High[A] = std::max(High[A], Surf.MaxBound[A]); }
+                AnyRef = true;
+            }
+            if (AnyRef) Frontier::FitOrbitCamera(State.Camera, Low, High);
+        }
+    }
     Right -= 28.0f + 4.0f;
     if (SheetIconButton(State, Sheet, "EdgeToggle", Right - 14.0f, Centre, 28.0f, IconSymbol::SketcherBody, 18.0f, 0, true, State.Style.EdgesEnabled))
         State.Style.EdgesEnabled = !State.Style.EdgesEnabled;
@@ -15789,7 +15964,7 @@ void DrawSketchToolbar(SketcherWorkspaceStatus& State, ImVec2 Image, ImVec2 Exte
     SketcherSheet Probe; Probe.Begin();
     constexpr float FontSize = 11.0f, ButtonHeight = 24.0f, Height = 30.0f, Padding = 7.0f;
     float Widths[9], Total = 12.0f;
-    for (int i = 0; i < 9; ++i) Total += (Widths[i] = Probe.Measure(TextIcons[i], FontSize) + 2.0f * Padding) + 2.0f;
+    for (int i = 0; i < 9; ++i) Total += (Widths[i] = Probe.Measure(TextIcons[i], FontSize, SketcherWeight::Regular) + 2.0f * Padding) + 2.0f;
     const float ToolWidth = 22.0f;
     Total += ToolWidth;
     // Keep the pill clear of the active view's orientation cube and hint text.
@@ -15814,8 +15989,8 @@ void DrawSketchToolbar(SketcherWorkspaceStatus& State, ImVec2 Image, ImVec2 Exte
         const SketcherPress Press = PressSketcherRegion(State.Widgets, Tool.Key, Box, Tool.Enabled);
         const bool Lit = Tool.Active || Press.HoveredCondition;
         if (Lit) Sheet.Box(Box, SketcherInk(0x303030), 12.0f);
-        const ColorQuad Ink = ControlKit::Faded(SketcherInk(Lit ? 0xffffff : 0xbababa), Tool.Enabled ? 1.0f : .32f);
-        Sheet.Text(Box.MinimumX + Padding, Centre, FontSize, Ink, TextIcons[Index]);
+        const ColorQuad Ink = ControlKit::Faded(SketcherInk(Lit ? 0xffffff : 0xc4c4c4), Tool.Enabled ? 1.0f : .32f);
+        Sheet.Text(Box.MinimumX + Padding, Centre, FontSize, Ink, TextIcons[Index], SketcherWeight::Regular);
         if (Press.HoveredCondition)
         {
             const char* Tips[] = {"Select: close editing tools", "Split curve at mouse: click the preview ring on a 3D spline or planar curve. Shape preserved; Esc exits.", "Point: add a control point to a curve",
@@ -17703,7 +17878,7 @@ void DrawStepCard(SketcherWorkspaceStatus& State)
             const std::string      Suffix  = Parameter.Name.substr(Prefix.size());
             const bool             Angular = Suffix == "Angle" || Suffix == "Pitch" || Suffix == "Roll";
             double Dragged = Mine ? Drag.Value : Parameter.Value;
-            ImGui::SetNextItemWidth(150);
+            ImGui::SetNextItemWidth(std::max(84.0f, std::floor(ImGui::GetContentRegionAvail().x * 0.56f)));
             const bool Edited = ImGui::DragScalar(Field.c_str(), ImGuiDataType_Double, &Dragged, Angular ? 0.5f : 0.005f, nullptr, nullptr, Angular ? "%.2f deg" : "%.4f m");
             RegisterWidget(State, Field.c_str());
             if (Edited && Dragged != (Mine ? Drag.Value : Parameter.Value))
@@ -17725,7 +17900,7 @@ void DrawStepCard(SketcherWorkspaceStatus& State)
             continue;
         }
         double Value = Parameter.Value;
-        ImGui::SetNextItemWidth(150);
+        ImGui::SetNextItemWidth(std::max(84.0f, std::floor(ImGui::GetContentRegionAvail().x * 0.56f)));
         ImGui::InputDouble(Field.c_str(), &Value, 0.0, 0.0, "%.4f");
         RegisterWidget(State, Field.c_str());
         if (ImGui::IsItemDeactivatedAfterEdit() && Value != Parameter.Value)
@@ -17809,8 +17984,14 @@ void DrawStepCard(SketcherWorkspaceStatus& State)
             {
                 const std::string Bound = Item.Value->Parameter.empty() ? std::string("[Literal]")
                                         : (SketcherUserVariableCondition({ Item.Value->Parameter }) ? ("=" + Item.Value->Parameter) : std::string("[Step]"));
-                ImGui::SetNextItemWidth(115);
-                if (ImGui::BeginCombo((std::string(Item.Name) + " var###Bind:" + Label + ":" + Item.Name).c_str(), Bound.c_str()))
+                ImGui::PushStyleColor(ImGuiCol_Text, Tint(MutedColour));
+                ImGui::Text("%s variable", Item.Name);
+                ImGui::PopStyleColor();
+                const float Spacing = ImGui::GetStyle().ItemSpacing.x;
+                const float SaveW   = 76.0f;
+                const float ComboW  = std::max(72.0f, ImGui::GetContentRegionAvail().x - SaveW - Spacing);
+                ImGui::SetNextItemWidth(ComboW);
+                if (ImGui::BeginCombo(("###Bind:" + Label + ":" + Item.Name).c_str(), Bound.c_str()))
                 {
                     if (ImGui::Selectable("[Literal] (unbind)", Item.Value->Parameter.empty()))
                     {
@@ -17832,7 +18013,7 @@ void DrawStepCard(SketcherWorkspaceStatus& State)
                     ImGui::EndCombo();
                 }
                 ImGui::SameLine();
-                if (PressButton(State, ("Save var###SaveVar:" + Label + ":" + Item.Name).c_str(), ImVec2(64, 0)))
+                if (PressButton(State, ("Save var###SaveVar:" + Label + ":" + Item.Name).c_str(), ImVec2(SaveW, 0)))
                 {
                     std::string Proposed = State.VariableNameText[0] != '\0' ? std::string(State.VariableNameText.data()) : (CaptionOf(State.Document, Label) + "_" + Item.Name);
                     for (char& Ch : Proposed) if (!(std::isalnum(static_cast<unsigned char>(Ch)) || Ch == '_')) Ch = '_';
@@ -17927,7 +18108,10 @@ void DrawVariablesCard(SketcherWorkspaceStatus& State)
         SketcherParameterDrag& Drag    = State.ParameterDrag;
         const bool             Mine    = Drag.Parameter == Var.Name;
         double                 Dragged = Mine ? Drag.Value : Var.Value;
-        ImGui::SetNextItemWidth(135);
+        const float AvailW = ImGui::GetContentRegionAvail().x;
+        const float DelW   = 26.0f;
+        const float DragW  = std::max(72.0f, std::floor((AvailW - DelW - ImGui::GetStyle().ItemSpacing.x) * 0.58f));
+        ImGui::SetNextItemWidth(DragW);
         const std::string SliderKey = Var.Name + "###Variable:" + Var.Name;
         const bool Edited = ImGui::DragScalar(SliderKey.c_str(), ImGuiDataType_Double, &Dragged, 0.005f, nullptr, nullptr, "%.4f");
         RegisterWidget(State, ("Variable:" + Var.Name).c_str());
@@ -17948,21 +18132,26 @@ void DrawVariablesCard(SketcherWorkspaceStatus& State)
             if (Final != Var.Value) { Conclude(State, AssignSketcherParameter(State.Document, Var.Name, Final)); break; }
         }
         ImGui::SameLine();
-        if (PressButton(State, ("✕###DelVar:" + Var.Name).c_str(), ImVec2(24, 0)))
+        if (PressButton(State, ("✕###DelVar:" + Var.Name).c_str(), ImVec2(DelW, 0)))
         {
             Conclude(State, DeleteSketcherVariable(State.Document, Var.Name));
             break;
         }
     }
-    ImGui::SetNextItemWidth(95);
+    const float Spacing = ImGui::GetStyle().ItemSpacing.x;
+    const float AddW    = 60.0f;
+    const float RestW   = std::max(90.0f, ImGui::GetContentRegionAvail().x - AddW - 2.0f * Spacing);
+    const float NameW   = std::floor(RestW * 0.56f);
+    const float ValW    = std::max(44.0f, RestW - NameW);
+    ImGui::SetNextItemWidth(NameW);
     ImGui::InputText("###NewVarName", State.VariableNameText.data(), State.VariableNameText.size());
     RegisterWidget(State, "NewVarName");
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(72);
+    ImGui::SetNextItemWidth(ValW);
     ImGui::InputDouble("###NewVarValue", &State.VariableValueInit, 0.0, 0.0, "%.3f");
     RegisterWidget(State, "NewVarValue");
     ImGui::SameLine();
-    if (PressButton(State, "+ Add###AddVariable", ImVec2(54, 0)))
+    if (PressButton(State, "+ Add###AddVariable", ImVec2(AddW, 0)))
     {
         const double Span = std::max(10.0, std::abs(State.VariableValueInit) * 4.0);
         Conclude(State, CreateSketcherVariable(State.Document, State.VariableNameText.data(), State.VariableValueInit,
@@ -18036,7 +18225,9 @@ void DrawModifierStackCard(SketcherWorkspaceStatus& State)
         "Live Boolean", "Bevel Edges", "Linear Array", "Circular Array", "Array Along Curve", "Array On Surface", "Bend Along Curve"
     };
     State.AddModifierKind = std::clamp(State.AddModifierKind, 0, 6);
-    ImGui::SetNextItemWidth(155);
+    const float ModAddW = 64.0f;
+    const float ModComboW = std::max(80.0f, ImGui::GetContentRegionAvail().x - ModAddW - ImGui::GetStyle().ItemSpacing.x);
+    ImGui::SetNextItemWidth(ModComboW);
     if (ImGui::BeginCombo("###AddModCombo", KindTitles[State.AddModifierKind]))
     {
         for (int KindIdx = 0; KindIdx < 7; ++KindIdx)
@@ -18046,7 +18237,7 @@ void DrawModifierStackCard(SketcherWorkspaceStatus& State)
     RegisterWidget(State, "AddModCombo");
     ImGui::SameLine();
     const bool HasBody = !State.Document.Regeneration.Bodies.empty();
-    if (PressButton(State, "+ Add###ModifierAdd", ImVec2(62, 0), HasBody))
+    if (PressButton(State, "+ Add###ModifierAdd", ImVec2(ModAddW, 0), HasBody))
     {
         FeatureModifier Mod;
         Mod.Kind = static_cast<ModifierCategory>(State.AddModifierKind);
@@ -18459,6 +18650,112 @@ void TurnImagePlane(SketcherImagePlane& Plane, double Angle)
     Plane.Turn   = std::remainder(Plane.Turn + Angle, 2.0 * std::numbers::pi);
 }
 
+// 📝 GPU-resident Blender reference surfaces (high-poly vehicles for CAD retopology): opacity (ghost ↔ solid),
+//    GPU crease line overlay, scale controls, per-part visibility toggles, and removal.
+void ConstructReferenceInspectorPanel(SketcherWorkspaceStatus& State)
+{
+    std::vector<SketcherReferenceSurface>& Surfaces = State.Document.ReferenceSurfaces;
+    if (Surfaces.empty()) return;
+    BeginCard("Blender references");
+    size_t Removal = Surfaces.size();
+    const bool FocusFound = std::any_of(Surfaces.begin(), Surfaces.end(),
+        [&](const SketcherReferenceSurface& Ref) { return Ref.Name == State.FocusedReference; });
+    if (!FocusFound) State.FocusedReference.clear();
+
+    for (size_t Index = 0; Index < Surfaces.size(); ++Index)
+    {
+        SketcherReferenceSurface& Ref = Surfaces[Index];
+        ImGui::PushID(int(Index));
+        const std::string VisLabel = "###RefVisible" + std::to_string(Index);
+        (void)SketcherAuthoringToggle(State, VisLabel.c_str(), &Ref.VisibleCondition);
+        ImGui::SameLine();
+        const bool Focused = Ref.Name == State.FocusedReference;
+        const std::string NameLabel = Ref.Name + (Ref.LockedCondition ? "  (locked)" : "") + "###RefName" + std::to_string(Index);
+        const float RemoveW = 68.0f;
+        const float Spacing = ImGui::GetStyle().ItemSpacing.x;
+        const float NameW   = std::max(60.0f, ImGui::GetContentRegionAvail().x - RemoveW - Spacing);
+        if (ToggleButton(State, NameLabel.c_str(), Focused, ImVec2(NameW, 0.0f)))
+            State.FocusedReference = Focused ? std::string{} : Ref.Name;
+        ImGui::SameLine();
+        const std::string RemoveLabel = "Remove###RefRemove" + std::to_string(Index);
+        if (PressButton(State, RemoveLabel.c_str(), ImVec2(RemoveW, 0.0f), !Ref.LockedCondition)) Removal = Index;
+
+        if (!Ref.SummaryNote.empty())
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, Tint(MutedColour));
+            ImGui::TextWrapped("%s", Ref.SummaryNote.c_str());
+            ImGui::PopStyleColor();
+        }
+
+        if (Focused)
+        {
+            (void)SketcherAuthoringSlider(State, "Opacity###RefOpacity", &Ref.Opacity, 0.12f, 1.0f);
+            if (ToggleButton(State, Ref.WireframeCondition ? "Creases ON###RefCrease" : "Creases OFF###RefCrease", Ref.WireframeCondition, RowSpan(2)))
+                Ref.WireframeCondition = !Ref.WireframeCondition;
+            ImGui::SameLine();
+            if (PressButton(State, "Frame###RefFrame", RowSpan(2)))
+            {
+                FitOrbitCamera(State.Camera, Ref.MinBound, Ref.MaxBound);
+                State.Camera.SceneRadius = std::max(State.Camera.SceneRadius,
+                    0.5 * std::hypot(Ref.MaxBound[0] - Ref.MinBound[0], Ref.MaxBound[1] - Ref.MinBound[1], Ref.MaxBound[2] - Ref.MinBound[2]));
+            }
+
+            if (PressButton(State, "×0.01###RefScaleDown", RowSpan(3), !Ref.LockedCondition))
+            {
+                RescaleReferenceSurface(Ref, 0.01);
+                ++State.Document.ReferenceRevision;
+                FitOrbitCamera(State.Camera, Ref.MinBound, Ref.MaxBound);
+                RefreshSketcherScene(State, true);
+            }
+            ImGui::SameLine();
+            if (PressButton(State, "Fit 5m###RefScaleFit", RowSpan(3), !Ref.LockedCondition))
+            {
+                const double Span = std::max({ Ref.MaxBound[0] - Ref.MinBound[0], Ref.MaxBound[1] - Ref.MinBound[1], Ref.MaxBound[2] - Ref.MinBound[2], 1.0e-6 });
+                RescaleReferenceSurface(Ref, 5.0 / Span);
+                ++State.Document.ReferenceRevision;
+                FitOrbitCamera(State.Camera, Ref.MinBound, Ref.MaxBound);
+                RefreshSketcherScene(State, true);
+            }
+            ImGui::SameLine();
+            if (PressButton(State, "×10###RefScaleUp", RowSpan(3), !Ref.LockedCondition))
+            {
+                RescaleReferenceSurface(Ref, 10.0);
+                ++State.Document.ReferenceRevision;
+                FitOrbitCamera(State.Camera, Ref.MinBound, Ref.MaxBound);
+                RefreshSketcherScene(State, true);
+            }
+
+            ImGui::PushStyleColor(ImGuiCol_Text, Tint(MutedColour));
+            ImGui::TextWrapped("Parts (%d) · Surface Trace snaps & conforms curves to GPU surface", int(Ref.Parts.size()));
+            ImGui::PopStyleColor();
+            if (ImGui::BeginChild("##RefPartsList", ImVec2(0.0f, std::min(160.0f, 24.0f * float(Ref.Parts.size()) + 8.0f)), true))
+            {
+                for (size_t PartIdx = 0; PartIdx < Ref.Parts.size(); ++PartIdx)
+                {
+                    SketcherReferencePart& Part = Ref.Parts[PartIdx];
+                    ImGui::PushID(int(PartIdx));
+                    ImGui::Checkbox(Part.Name.c_str(), &Part.VisibleCondition);
+                    if (ImGui::IsItemHovered() && !Part.ModifierSummary.empty())
+                        ImGui::SetTooltip("%s · %u tris", Part.ModifierSummary.c_str(), Part.CornerCount / 3u);
+                    ImGui::PopID();
+                }
+            }
+            ImGui::EndChild();
+        }
+        ImGui::PopID();
+    }
+    if (Removal < Surfaces.size())
+    {
+        const std::string RemovedName = Surfaces[Removal].Name;
+        Surfaces.erase(Surfaces.begin() + ptrdiff_t(Removal));
+        if (State.FocusedReference == RemovedName) State.FocusedReference.clear();
+        ++State.Document.ReferenceRevision;
+        RefreshSketcherScene(State, true);
+        Announce(State, "Removed reference surface " + RemovedName);
+    }
+    EndCard();
+}
+
 // 📝 Blueprint image planes (from a curves file's [[ImagePlanes]], the document or Construct › Image plane), also listed in
 //    the Outliner (eye, lock, pick). Every plane has a row; the picked one (Outliner, or its name here) opens its
 //    properties: opacity (1 − transparency), line art / photograph, mirror, crop margins, width, turn and centre. Edits
@@ -18482,10 +18779,12 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
         ImGui::SameLine();
         const bool        Focused   = Plane.Name == State.FocusedImage;
         const std::string NameLabel = Plane.Name + (Plane.LockCondition ? "  (locked)" : "") + "###PlaneName" + std::to_string(Index);
-        if (ToggleButton(State, NameLabel.c_str(), Focused, ImVec2(ImGui::GetContentRegionAvail().x - 80.0f, 0.0f))) State.FocusedImage = Focused ? std::string{} : Plane.Name;
+        const float RemoveW = 68.0f;
+        const float NameW   = std::max(60.0f, ImGui::GetContentRegionAvail().x - RemoveW - ImGui::GetStyle().ItemSpacing.x);
+        if (ToggleButton(State, NameLabel.c_str(), Focused, ImVec2(NameW, 0.0f))) State.FocusedImage = Focused ? std::string{} : Plane.Name;
         ImGui::SameLine();
         const std::string RemoveLabel = "Remove###PlaneRemove" + std::to_string(Index);
-        if (PressButton(State, RemoveLabel.c_str(), ImVec2(0, 0), !Plane.LockCondition)) Removal = Index;
+        if (PressButton(State, RemoveLabel.c_str(), ImVec2(RemoveW, 0.0f), !Plane.LockCondition)) Removal = Index;
         const auto     Found   = std::find(State.Pictures.Paths.begin(), State.Pictures.Paths.end(), Plane.Path);
         const size_t   Picture = size_t(Found - State.Pictures.Paths.begin());
         const bool     Decoded = Found != State.Pictures.Paths.end() && State.Pictures.Refusals[Picture].empty();
@@ -18495,7 +18794,6 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
         if (Focused)
         {
             // Look: opacity, ink or photograph, mirror.
-            ImGui::SetNextItemWidth(RowSpan().x);
             float Opacity = float(Plane.Opacity);
             if (SketcherAuthoringSlider(State, "Opacity###ImageOpacity", &Opacity, 0.05f, 1.0f))
             {
@@ -18503,15 +18801,14 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
                 EditedCondition = true;
             }
 
-            ImGui::TextDisabled("transparency %d %%", int(std::lround((1.0 - Plane.Opacity) * 100.0)));
-            if (ToggleButton(State, "Line art###ImageInk", !Plane.PhotoCondition, RowSpan(4))) { Plane.PhotoCondition = false; EditedCondition = true; }
+            ImGui::TextDisabled("Transparency %d%%", int(std::lround((1.0 - Plane.Opacity) * 100.0)));
+            if (ToggleButton(State, "Line art###ImageInk", !Plane.PhotoCondition, RowSpan(2))) { Plane.PhotoCondition = false; EditedCondition = true; }
             ImGui::SameLine();
-            if (ToggleButton(State, "Photo###ImagePhoto", Plane.PhotoCondition, RowSpan(4))) { Plane.PhotoCondition = true; EditedCondition = true; }
-            ImGui::SameLine();
+            if (ToggleButton(State, "Photo###ImagePhoto", Plane.PhotoCondition, RowSpan(2))) { Plane.PhotoCondition = true; EditedCondition = true; }
             ImGui::BeginDisabled(Plane.LockCondition);
-            if (ToggleButton(State, "Mirror H###ImageFlipAcross", Plane.FlipAcrossCondition, RowSpan(4))) { Plane.FlipAcrossCondition = !Plane.FlipAcrossCondition; EditedCondition = true; }
+            if (ToggleButton(State, "Mirror H###ImageFlipAcross", Plane.FlipAcrossCondition, RowSpan(2))) { Plane.FlipAcrossCondition = !Plane.FlipAcrossCondition; EditedCondition = true; }
             ImGui::SameLine();
-            if (ToggleButton(State, "Mirror V###ImageFlipDown", Plane.FlipDownCondition, RowSpan(4))) { Plane.FlipDownCondition = !Plane.FlipDownCondition; EditedCondition = true; }
+            if (ToggleButton(State, "Mirror V###ImageFlipDown", Plane.FlipDownCondition, RowSpan(2))) { Plane.FlipDownCondition = !Plane.FlipDownCondition; EditedCondition = true; }
             ImGui::EndDisabled();
             if (ToggleButton(State, Plane.LockCondition ? "Locked###ImageLock" : "Lock###ImageLock", Plane.LockCondition, RowSpan()))
             {
@@ -18530,7 +18827,6 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
                 static const char* const Sides[4] = { "Crop left (%)###ImageCropLeft", "Crop top (%)###ImageCropTop", "Crop right (%)###ImageCropRight", "Crop bottom (%)###ImageCropBottom" };
                 for (int Side = 0; Side < 4; ++Side)
                 {
-                    ImGui::SetNextItemWidth(RowSpan().x);
                     if (SketcherAuthoringSlider(State, Sides[Side], &Margins[Side], 0.0f, 95.0f))
                     {
                         std::array<int, 4> Next = Crop;
@@ -18546,8 +18842,8 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
             }
             // Placement: width (uniform scale about the centre), turn about the normal, centre.
             double PlaneWidth = GeometrySpace::Parametric::Length(Plane.Right);
-            ImGui::SetNextItemWidth(RowSpan().x);
-            if (ImGui::InputDouble("width m###ImageWidth", &PlaneWidth, 0.0, 0.0, "%.4f", ImGuiInputTextFlags_EnterReturnsTrue) && PlaneWidth > 1.0e-6)
+            ImGui::SetNextItemWidth(RowSpan(2).x);
+            if (ImGui::InputDouble("###ImageWidth", &PlaneWidth, 0.0, 0.0, "w %.3f m", ImGuiInputTextFlags_EnterReturnsTrue) && PlaneWidth > 1.0e-6)
             {
                 ScaleImagePlane(Plane, PlaneWidth);
                 EditedCondition = true;
@@ -18555,7 +18851,7 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
             RegisterWidget(State, "###ImageWidth");
             ImGui::SameLine();
             float Degrees = float(Plane.Turn * 180.0 / std::numbers::pi);
-            ImGui::SetNextItemWidth(RowSpan().x);
+            ImGui::SetNextItemWidth(RowSpan(2).x);
             if (ImGui::DragFloat("###ImageTurn", &Degrees, 0.5f, -180.0f, 180.0f, "turn %.1f deg"))
             {
                 TurnImagePlane(Plane, double(Degrees) * std::numbers::pi / 180.0 - Plane.Turn);
@@ -18573,8 +18869,13 @@ void DrawImagePlaneCard(SketcherWorkspaceStatus& State)
             RegisterWidget(State, "###ImageCentre");
             ImGui::EndDisabled();
         }
-        if (Decoded) ImGui::TextDisabled("%u × %u px · %.3f × %.3f m%s", Width, Height, GeometrySpace::Parametric::Length(Plane.Right), GeometrySpace::Parametric::Length(Plane.Down),
-                                         Focused ? " · centre x y z" : "");
+        if (Decoded)
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, Tint(MutedColour));
+            ImGui::TextWrapped("%u × %u px · %.3f × %.3f m%s", Width, Height, GeometrySpace::Parametric::Length(Plane.Right), GeometrySpace::Parametric::Length(Plane.Down),
+                               Focused ? " · centre x y z" : "");
+            ImGui::PopStyleColor();
+        }
         if (Focused)
         {
             const std::filesystem::path SourcePath(ResolveSketcherImagePath(Plane.Path, State.DocumentPath.empty() ? State.Options.DocumentPath : State.DocumentPath));
@@ -18715,6 +19016,10 @@ void DrawDrawingOptions(SketcherWorkspaceStatus& State)
             if(Surface && D.Form!=SketchSplineForm::Bezier)D.Form=SketchSplineForm::Nurbs;
         }
         ImGui::EndDisabled();
+        if (D.SurfaceCondition && !State.Document.ReferenceSurfaces.empty())
+        {
+            SketcherAuthoringToggle(State, "Conform spans to surface###ToolSurfaceConform", &State.SurfaceConformEnabled);
+        }
         SketcherAuthoringToggle(State, "Snap to curves###ToolCurveSnap",&State.DrawingCurveSnap);
         ImGui::BeginDisabled(Arc);SketcherAuthoringToggle(State, "Auto-split 3D crossings###ToolAutoSplit",&State.DrawingAutoSplit);ImGui::EndDisabled();
         ImGui::BeginDisabled(Arc);SketcherAuthoringToggle(State, "Auto-surface closed loops###ToolAutoSurface",&State.DrawingAutoSurface);ImGui::EndDisabled();
@@ -18858,15 +19163,26 @@ void DrawDrawingCard(SketcherWorkspaceStatus& State)
     if(PressButton(State,"Build surfaces from closed loops###BuildLoopSurfaces",ImVec2(-1,0),!Drawing.ActiveCondition)) Conclude(State,BuildSketcherClosedLoopSurfaces(State.Document,State.DrawingIntersectionTolerance));
     ImGui::BeginDisabled(Drawing.ActiveCondition || State.Knife.ActiveCondition);
     if (SketcherAuthoringToggle(State, "Surface snap###SurfaceTrace", &State.SurfaceTraceEnabled))
-        Announce(State, State.SurfaceTraceEnabled ? "Surface tracing ON · Curve / Arc / Line · Ctrl: model edges · no planar fallback" : "Surface tracing OFF · ordinary sketch tools");
+        Announce(State, State.SurfaceTraceEnabled ? "Surface tracing ON · Curve / Arc / Line · spans conform to reference mesh" : "Surface tracing OFF · ordinary sketch tools");
     RegisterWidget(State, "###SurfaceTrace");
     ImGui::EndDisabled();
+    if (State.SurfaceTraceEnabled && !State.Document.ReferenceSurfaces.empty())
+    {
+        SketcherAuthoringToggle(State, "Conform spans to surface###SurfaceConform", &State.SurfaceConformEnabled);
+        RegisterWidget(State, "###SurfaceConform");
+    }
     SketcherAuthoringToggle(State, "XYZ editing###FullXYZ", &State.FullXYZEnabled);
     RegisterWidget(State, "###FullXYZ");
     SketcherAuthoringToggle(State, "Reference edges###TraceEdges", &State.Style.EdgesEnabled);
     RegisterWidget(State, "###TraceEdges");
     if (State.SurfaceTraceEnabled)
-        ImGui::TextWrapped("Only clicked controls snap. Enter adds no points. Ctrl: curve, then CAD edge. Spans may leave the surface. Arc stays planar.");
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, Tint(MutedColour));
+        ImGui::TextWrapped(State.SurfaceConformEnabled && !State.Document.ReferenceSurfaces.empty()
+            ? "Clicks snap onto reference surfaces; spans conform to the outer skin and auto-cut crossings. Arc stays planar."
+            : "Only clicked controls snap. Enter finishes. Ctrl: curve or CAD edge. Arc stays planar.");
+        ImGui::PopStyleColor();
+    }
     if (State.FullXYZEnabled) ImGui::TextWrapped("G → X/Y/Z → distance → Enter. Free XYZ edits are not surface-bound.");
     EndCard();
     if (!Drawing.ActiveCondition)
@@ -18877,11 +19193,13 @@ void DrawDrawingCard(SketcherWorkspaceStatus& State)
             { "Circle (Shift+W)###DrawCircle", SketcherDrawingCategory::Circle }, { "Curve (Shift+S)###DrawCurve", SketcherDrawingCategory::Curve },
             { "Arc (3 points)###DrawArc", SketcherDrawingCategory::Arc }, { "Slot###DrawSlot", SketcherDrawingCategory::Slot },
             { "Polygon###DrawPolygon", SketcherDrawingCategory::Polygon } };
+        int ShownTool = 0;
         for (int Index = 0; Index < 7; ++Index)
         {
             if (State.SurfaceTraceEnabled && Tools[Index].Kind != SketcherDrawingCategory::Line && Tools[Index].Kind != SketcherDrawingCategory::Curve && Tools[Index].Kind != SketcherDrawingCategory::Arc) continue;
-            if (Index % 2 == 1) ImGui::SameLine();
+            if (ShownTool % 2 == 1) ImGui::SameLine();
             if (PressButton(State, Tools[Index].Label, RowSpan(), !State.Bevel.ActiveCondition)) OpenDrawingSession(State, Tools[Index].Kind);
+            ++ShownTool;
         }
         if (FocusedSketchCondition(State))
         {
@@ -18936,19 +19254,23 @@ void DrawDrawingCard(SketcherWorkspaceStatus& State)
     }
     BeginCard(SketcherDrawingLabel(Drawing.Kind));
     static const char* Planes[] = { "XY", "XZ", "YZ" };
-    if (Drawing.SurfaceCondition) ImGui::Text("SURFACE · %d control(s) · Ctrl: model edge", int(Drawing.Points.size()));
-    else if (Drawing.FacePlaneCondition) ImGui::Text("On face %s · %d point(s)", Drawing.FaceName.c_str(), int(Drawing.Points.size()));
-    else                            ImGui::Text("Plane %s · %d point(s)", Planes[std::clamp(Drawing.GridPlane, 0, 2)], int(Drawing.Points.size()));
+    ImGui::PushStyleColor(ImGuiCol_Text, Tint(MutedColour));
+    if (Drawing.SurfaceCondition) ImGui::TextWrapped("SURFACE · %d control(s) · Ctrl: model edge", int(Drawing.Points.size()));
+    else if (Drawing.FacePlaneCondition) ImGui::TextWrapped("On face %s · %d point(s)", Drawing.FaceName.c_str(), int(Drawing.Points.size()));
+    else ImGui::TextWrapped("Plane %s · %d point(s)", Planes[std::clamp(Drawing.GridPlane, 0, 2)], int(Drawing.Points.size()));
+    ImGui::PopStyleColor();
     if (Drawing.Kind == SketcherDrawingCategory::Curve)
     {
         static const struct { const char* Label; SketchSplineForm Form; } Forms[] = {
             { "Hermite (1)###FormHermite", SketchSplineForm::Hermite }, { "Bezier (2)###FormBezier", SketchSplineForm::Bezier },
             { "NURBS (3)###FormNurbs", SketchSplineForm::Nurbs }, { "Cubic spline (4)###FormCubic", SketchSplineForm::CubicSpline } };
+        int ShownForm = 0;
         for (int Index = 0; Index < 4; ++Index)
         {
             if (Drawing.SurfaceCondition && Index != 1 && Index != 2) continue;
-            if (Index % 2 == 1 && !Drawing.SurfaceCondition) ImGui::SameLine();
+            if (ShownForm % 2 == 1) ImGui::SameLine();
             if (ToggleButton(State, Forms[Index].Label, Drawing.Form == Forms[Index].Form, RowSpan())) { Drawing.Form = Forms[Index].Form; Drawing.Refusal.clear(); }
+            ++ShownForm;
         }
     }
     if (Drawing.Kind == SketcherDrawingCategory::Polygon)
@@ -19221,7 +19543,7 @@ void DrawIntroCards(SketcherWorkspaceStatus& State, SketcherSheet& Sheet)
     Y += 35.0f + 20.0f;
     const float TitleWidth = Sheet.Measure("Select geometry", 18.0f, SketcherWeight::Light, -0.6f);
     Sheet.Text(0.5f * (Intro.MinimumX + Intro.MaximumX - TitleWidth), Y + 0.5f * 18.0f * SketcherStyleTokens::FontScale, 18.0f, SketcherInk(0xeeeeee),
-               "Select geometry", SketcherWeight::Light, -0.6f);
+               "Select geometry", SketcherWeight::Regular, -0.4f);
     Y += 18.0f * SketcherStyleTokens::FontScale + 15.0f;
     DrawParagraph(Sheet, Intro.MinimumX + 22.0f, Y, Inner, Hint, true);
     CloseSheetCard(Intro);
@@ -19235,7 +19557,7 @@ void DrawIntroCards(SketcherWorkspaceStatus& State, SketcherSheet& Sheet)
     const PlaneExtent Start = PlaceSheetCard(Sheet, 2.0f * CardInset + 17.0f * SketcherStyleTokens::FontScale + LeadHeight + 16.0f + OperationGridHeight(Operations.size()));
     const float Left = Start.MinimumX + CardInset;
     Y = Start.MinimumY + CardInset;
-    Sheet.Text(Left, Y + 0.5f * 17.0f * SketcherStyleTokens::FontScale, 17.0f, SketcherInk(0xeeeeee), "Start constructing");
+    Sheet.Text(Left, Y + 0.5f * 17.0f * SketcherStyleTokens::FontScale, 16.0f, SketcherInk(0xeeeeee), "Start constructing", SketcherWeight::Regular);
     Y += 17.0f * SketcherStyleTokens::FontScale;
     Y += DrawParagraph(Sheet, Left, Y, CardInner, Lead) + 16.0f;
     const std::string Pressed = DrawOperationGrid(State, Sheet, Left, Y, CardInner, Operations);
@@ -19425,11 +19747,11 @@ void DrawInspectorTabs(SketcherWorkspaceStatus& State, SketcherSheet& Sheet)
         { SketcherInspectorTab::Topology, "Topology", "InspectorTopology" }, { SketcherInspectorTab::History, "History", "InspectorHistory" } };
     constexpr int TabCount = 4;
     float Words = 0.0f;
-    for (int Index = 0; Index < TabCount; ++Index) Words += Sheet.Measure(Tabs[Index].Label, 10.0f);
-    const float Padding = std::clamp((Bar.Width() - 2.0f - 6.0f - Words - 4.0f * float(TabCount - 1)) / float(TabCount), 12.0f, 32.0f);   // [px] - 32 when it fits
+    for (int Index = 0; Index < TabCount; ++Index) Words += Sheet.Measure(Tabs[Index].Label, 10.0f, SketcherWeight::Regular);
+    const float Padding = std::clamp((Bar.Width() - 2.0f - 6.0f - Words - 4.0f * float(TabCount - 1)) / float(TabCount), 8.0f, 32.0f);
     float Widths[TabCount], Total = 0.0f;
-    for (int Index = 0; Index < TabCount; ++Index) Total += Widths[Index] = Padding + Sheet.Measure(Tabs[Index].Label, 10.0f);
-    const float Gap    = (Bar.Width() - 2.0f - 6.0f - Total) / float(TabCount - 1);           // justify-content: space-between
+    for (int Index = 0; Index < TabCount; ++Index) Total += Widths[Index] = Padding + Sheet.Measure(Tabs[Index].Label, 10.0f, SketcherWeight::Regular);
+    const float Gap    = std::max(2.0f, (Bar.Width() - 2.0f - 6.0f - Total) / float(TabCount - 1));
     float       Cursor = Bar.MinimumX + 1.0f + 3.0f;
     const float Height = 10.0f * SketcherStyleTokens::FontScale + 12.0f;
     for (int Index = 0; Index < TabCount; ++Index)
@@ -19438,8 +19760,9 @@ void DrawInspectorTabs(SketcherWorkspaceStatus& State, SketcherSheet& Sheet)
         const SketcherPress Press  = PressSketcherRegion(State.Widgets, Tabs[Index].Key, Button);
         const bool          Active = State.InspectorTab == Tabs[Index].Tab;
         if (Active || Press.HoveredCondition) Sheet.Box(Button, SketcherInk(0x292929), 30.0f);
-        Sheet.Text(Button.MinimumX + 0.5f * Padding, 0.5f * (Button.MinimumY + Button.MaximumY), 10.0f, SketcherInk(Active ? 0xeeeeee : Press.HoveredCondition ? 0xffffff : 0x858585),
-                   Tabs[Index].Label);
+        Sheet.Text(Button.MinimumX + 0.5f * Padding, 0.5f * (Button.MinimumY + Button.MaximumY), 10.0f,
+                   SketcherInk(Active ? 0xeeeeee : Press.HoveredCondition ? 0xffffff : 0x909090),
+                   Tabs[Index].Label, Active ? SketcherWeight::Regular : SketcherWeight::Light);
         if (Press.ClickedCondition) State.InspectorTab = Tabs[Index].Tab;
         Cursor += Widths[Index] + Gap;
     }
@@ -19497,10 +19820,16 @@ void DrawBoundsCard(SketcherWorkspaceStatus& State, SketcherSheet& Sheet, const 
         const PlaneExtent Cell   = Spanning(Left + float(Index) * (Column + 8.0f), Top + CardHeadingHeight, Column, 33.0f);
         const float       Centre = 0.5f * (Cell.MinimumY + Cell.MaximumY);
         Sheet.Box(Cell, SketcherInk(0x101010), 12.0f);
-        Sheet.Text(Cell.MinimumX + 9.0f, Centre, 10.0f, SketcherInk(Axes[Index].Ink), Axes[Index].Axis);
-        const float Unit = Sheet.TextRight(Cell.MaximumX - 9.0f, Centre, 8.0f, SketcherInk(0x888888), "m");
+        const float AxisW = Sheet.Text(Cell.MinimumX + 8.0f, Centre, 10.0f, SketcherInk(Axes[Index].Ink), Axes[Index].Axis, SketcherWeight::Regular);
+        const float UnitW = Sheet.TextRight(Cell.MaximumX - 8.0f, Centre, 8.0f, SketcherInk(0x888888), "m", SketcherWeight::Light);
         const std::string Value = Compose("%.4g", High[size_t(Index)] - Low[size_t(Index)]);
-        Sheet.TextRight(Cell.MaximumX - 9.0f - Unit - 6.0f, Centre, 11.0f, SketcherInk(0xeeeeee), Value.c_str());
+        const float ValLeft = Cell.MinimumX + 8.0f + AxisW + 4.0f;
+        const float ValMaxW = std::max(12.0f, Cell.MaximumX - 8.0f - UnitW - 4.0f - ValLeft);
+        const float ValW    = Sheet.Measure(Value.c_str(), 10.5f, SketcherWeight::Regular);
+        if (ValW <= ValMaxW)
+            Sheet.TextRight(Cell.MaximumX - 8.0f - UnitW - 4.0f, Centre, 10.5f, SketcherInk(0xeeeeee), Value.c_str(), SketcherWeight::Regular);
+        else
+            Sheet.TextClipped(ValLeft, Centre, ValMaxW, 10.0f, SketcherInk(0xeeeeee), Value.c_str(), SketcherWeight::Regular);
     }
     CloseSheetCard(Card);
 }
@@ -19735,13 +20064,15 @@ void DrawInspector(SketcherWorkspaceStatus& State, ImVec2 Position, ImVec2 Size,
     const float FooterTop = Panel.MaximumY - 1.0f - 32.0f;
     Sheet.Line(Left, FooterTop + 0.5f, Right, FooterTop + 0.5f, SketcherWash(0x0a));
     Sheet.Icon(IconSymbol::SketcherLink, Left + 13.0f, FooterTop + 16.0f - 5.5f, 11.0f, SketcherInk(0x737373));
-    Sheet.Text(Left + 13.0f + 11.0f + 6.0f, FooterTop + 16.0f, 9.0f, SketcherInk(0x737373), "Operations run in Engine/GeometrySpace::Parametric");
+    const float FooterTextX = Left + 13.0f + 11.0f + 6.0f;
+    Sheet.TextClipped(FooterTextX, FooterTop + 16.0f, std::max(24.0f, Right - 13.0f - FooterTextX), 9.0f, SketcherInk(0x787878),
+                      "Operations run in Engine/GeometrySpace::Parametric", SketcherWeight::Light);
 
     const float BodyTop = Top + 64.0f;
     ImGui::SetCursorScreenPos(ImVec2(Left + 10.0f, BodyTop));
     PushInspectorStyle();
     ImGui::BeginChild("InspectorBody", ImVec2(Right - Left - 20.0f, FooterTop - 10.0f - BodyTop), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-    ImGui::PushFont(static_cast<ImFont*>(QuerySketcherTypefaces().Light), 11.0f * SketcherStyleTokens::FontScale);
+    ImGui::PushFont(static_cast<ImFont*>(QuerySketcherTypefaces().Regular), 11.0f * SketcherStyleTokens::FontScale);
     SketcherSheet Body;
     Body.Begin();
     const SketcherSelection& Selection = State.Document.Selection;
@@ -19788,6 +20119,7 @@ void DrawInspector(SketcherWorkspaceStatus& State, ImVec2 Position, ImVec2 Size,
         DrawConstraintCard(State);
         DrawBodyCard(State);
         DrawAppearanceCard(State);
+        ConstructReferenceInspectorPanel(State);
         DrawImagePlaneCard(State);
         if (!State.Drawing.ActiveCondition)
         {
@@ -20046,6 +20378,7 @@ void ApplyShortcuts(SketcherWorkspaceStatus& State)
 #ifdef FRONTIER_DEVELOPMENT_TRACE
     if (ImGui::IsKeyPressed(ImGuiKey_F12, false)) State.TraceShown = !State.TraceShown;          // development: operation trace panel
 #endif
+    if (State.ProjectBrowserOpen) return;
     if (Io.WantTextInput || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return;
     const bool Control   = Io.KeyCtrl;
     const bool Shift     = Io.KeyShift;
@@ -20053,6 +20386,15 @@ void ApplyShortcuts(SketcherWorkspaceStatus& State)
     if (ImGui::IsKeyPressed(ImGuiKey_LeftAlt, false) || ImGui::IsKeyPressed(ImGuiKey_RightAlt, false)) State.Picker.AlongUsedCondition = false;
     auto Pressed = [](ImGuiKey Key) { return ImGui::IsKeyPressed(Key, false); };
     const SketcherOperationInput OperationInput = SketcherOperationInput::Capture();
+
+    // Fullscreen viewport toggle (F11 or Ctrl+Space) works from anywhere inside SolidArc.
+    if ((!Control && !Shift && !Alternate && Pressed(ImGuiKey_F11))
+        || (Control && !Shift && !Alternate && Pressed(ImGuiKey_Space)))
+    {
+        State.ViewportMaximizedEnabled = !State.ViewportMaximizedEnabled;
+        Announce(State, State.ViewportMaximizedEnabled ? "Viewport fullscreen ON (F11 or Ctrl+Space to exit)" : "Viewport fullscreen OFF");
+        return;
+    }
 
     // Drawing sheet (Alt+D): the paper replaces the model — Esc or Alt+D returns, Ctrl+S still saves.
     if (State.DrawingSheet.ActiveCondition)
@@ -20649,7 +20991,7 @@ void ApplyShortcuts(SketcherWorkspaceStatus& State)
             Announce(State, std::string("Viewport layout: ") + ViewportLayoutShortLabel(TargetLayout) + " (Ctrl+Alt+Q)");
             return;
         }
-        if (Pressed(ImGuiKey_O)) State.PopupRequest = "Open document";
+        if (Pressed(ImGuiKey_O)) OpenSketcherProjectBrowser(State);
         if (Pressed(ImGuiKey_A) && !Shift && !Alternate) SelectAll(State);                  // edit:select-all (Ctrl+A)
         if (Pressed(ImGuiKey_I))
         {
@@ -20869,7 +21211,8 @@ void ConfigureSketcherInterface(const SketcherOptions& Options)
     const auto HoldsTypeface = [](const std::filesystem::path& Candidate)
     {
         std::error_code Failure;
-        return std::filesystem::exists(Candidate / "EngineContent/FontArchives/DMSans/DMSans-Regular.ttf", Failure)
+        return std::filesystem::exists(Candidate / "EngineContent/FontsArchives/DMSans/DMSans-Regular.ttf", Failure)
+            || std::filesystem::exists(Candidate / "EngineContent/FontArchives/DMSans/DMSans-Regular.ttf", Failure)
             || std::filesystem::exists(Candidate / "EngineContent/FontArchives/DM Sans/DMSans-Regular.ttf", Failure);
     };
     const auto HoldsSketcherIcons = [](const std::filesystem::path& IconsDir)
@@ -20885,14 +21228,43 @@ void ConfigureSketcherInterface(const SketcherOptions& Options)
     if (HoldsTypeface(Packaged) && HoldsSketcherIcons(Packaged / "EngineContent/Icons")) Root = Packaged; // Packaged standalone wins when complete
     else if (Root == "." && HoldsTypeface(Packaged)) Root = Packaged;
     std::filesystem::path Family;
-    for (const char* Candidate : { "EngineContent/FontArchives/DMSans", "EngineContent/FontArchives/DM Sans" })
+    for (const char* Candidate : { "EngineContent/FontsArchives/DMSans", "EngineContent/FontArchives/DMSans", "EngineContent/FontArchives/DM Sans" })
         if (std::filesystem::exists(Root / Candidate / "DMSans-Regular.ttf")) { Family = Root / Candidate; break; }
     const std::string FontPath = !Options.FontPath.empty() ? Options.FontPath : Family.empty() ? std::string() : (Family / "DMSans-Regular.ttf").string();
     SketcherTypefaces Typefaces;
-    if (Io.Fonts->Fonts.Size > 0)
+    if (TypographyRepository* Repo = TypographyRepository::QueryCurrent(); Repo != nullptr && Repo->QueryGroupCount() > 0u)
     {
-        ImFont* Existing = Io.Fonts->Fonts[0];
-        Typefaces = { Existing, Existing };
+        // Prefer DM Sans (Light 300 + Regular 400); fall back to Inter or group 0 — never assign hairline Thin (100) to Regular.
+        int32_t GroupIdx = Repo->ResolveGroupIndex("DMSans");
+        if (GroupIdx < 0) GroupIdx = Repo->ResolveGroupIndex("Inter");
+        if (GroupIdx < 0) GroupIdx = 0;
+        const uint32_t UGroup = static_cast<uint32_t>(GroupIdx);
+        ImFont* Regular = Repo->QueryFont(UGroup, FontWeightClass::Regular);
+        ImFont* Light   = Repo->QueryFont(UGroup, FontWeightClass::Light);
+        if (Light == nullptr) Light = Regular;
+        if (Regular == nullptr) Regular = Light;
+        Typefaces = { Light, Regular };
+        if (Regular != nullptr && Io.FontDefault == nullptr) Io.FontDefault = Regular;
+    }
+    else if (Io.Fonts->Fonts.Size > 0)
+    {
+        // Scan already-registered atlas faces by name so Fonts[0] (often Thin 100) is never forced onto Regular.
+        ImFont* FoundRegular = nullptr;
+        ImFont* FoundLight   = nullptr;
+        for (int I = 0; I < Io.Fonts->Fonts.Size; ++I)
+        {
+            ImFont* Candidate = Io.Fonts->Fonts[I];
+            if (!Candidate) continue;
+            std::string Name = Candidate->GetDebugName() ? Candidate->GetDebugName() : "";
+            for (char& Ch : Name) Ch = static_cast<char>(std::tolower(static_cast<unsigned char>(Ch)));
+            if (Name.find("dmsans-regular") != std::string::npos) FoundRegular = Candidate;
+            else if (!FoundRegular && Name.find("regular") != std::string::npos) FoundRegular = Candidate;
+            if (Name.find("dmsans-light") != std::string::npos) FoundLight = Candidate;
+            else if (!FoundLight && Name.find("light") != std::string::npos && Name.find("extralight") == std::string::npos) FoundLight = Candidate;
+        }
+        ImFont* Regular = FoundRegular ? FoundRegular : (Io.FontDefault ? Io.FontDefault : Io.Fonts->Fonts[0]);
+        ImFont* Light   = FoundLight ? FoundLight : Regular;
+        Typefaces = { Light, Regular };
     }
     else if (!FontPath.empty() && std::filesystem::exists(FontPath))
     {
@@ -21292,6 +21664,7 @@ void DrawSketcherInterface(SketcherWorkspaceStatus& State, ImTextureID ViewportT
             }
         }
     }
+    DrawSketcherProjectBrowserOverlay(State);
     { SketcherPhaseClock Clock(Profile, "autosave"); AdvanceAutosave(State, DeltaSeconds); }
     { SketcherPhaseClock Clock(Profile, "bevel preview"); StageBevelPreview(State); }
     State.FrameNumber += 1;
@@ -21422,6 +21795,7 @@ void EndSketcherHostedFrame(SketcherWorkspaceStatus& State, double DeltaSeconds,
         DrawWorkspacePopups(State);
         DrawMatcapPicker(State);
         DrawWelcome(State);
+        DrawSketcherProjectBrowserOverlay(State);
         { SketcherPhaseClock Clock(Profile, "trace panel"); DrawTracePanel(State); }
     }
     { SketcherPhaseClock Clock(Profile, "autosave"); AdvanceAutosave(State, DeltaSeconds); }
@@ -21449,7 +21823,7 @@ bool IntakeSketcherDroppedFile(SketcherWorkspaceStatus& State, const std::string
         if (OutDiagnostic != nullptr) *OutDiagnostic = State.Status;
         return Added;
     }
-    if (Ext == ".solidarc")
+    if (Ext == ".solidarc" || Ext == ".sketch" || Ext == ".sketcher")
     {
         OpenDocument(State, FilePath, true);
         if (OutDiagnostic != nullptr) *OutDiagnostic = State.Status;
@@ -21543,6 +21917,26 @@ void RefreshSketcherScene(SketcherWorkspaceStatus& State, bool DirtyCondition)
     if (State.ReadyScene && State.ReadyScene->Revision == State.Document.Revision && !State.ZebraEnabled) State.Scene = std::move(*State.ReadyScene);
     else State.Scene = BuildSketcherScene(State.Document, 1.5e-3, State.ZebraEnabled);
     State.ReadyScene.reset();
+    bool HasRefBounds = false;
+    for (const SketcherReferenceSurface& Ref : State.Document.ReferenceSurfaces)
+    {
+        if (!Ref.VisibleCondition || Ref.TriangleCount() == 0u) continue;
+        if (!HasRefBounds && State.Scene.Corners.empty() && State.Scene.Segments.empty())
+        {
+            State.Scene.BoundsLow  = Ref.MinBound;
+            State.Scene.BoundsHigh = Ref.MaxBound;
+            HasRefBounds = true;
+        }
+        else
+        {
+            for (int Axis = 0; Axis < 3; ++Axis)
+            {
+                State.Scene.BoundsLow[Axis]  = std::min(State.Scene.BoundsLow[Axis], Ref.MinBound[Axis]);
+                State.Scene.BoundsHigh[Axis] = std::max(State.Scene.BoundsHigh[Axis], Ref.MaxBound[Axis]);
+            }
+            HasRefBounds = true;
+        }
+    }
     State.Camera.SceneRadius = std::max(1.0, 0.5 * std::hypot(State.Scene.BoundsHigh[0] - State.Scene.BoundsLow[0], State.Scene.BoundsHigh[1] - State.Scene.BoundsLow[1],
                                                               State.Scene.BoundsHigh[2] - State.Scene.BoundsLow[2]));
     State.HoverIdentity = 0;

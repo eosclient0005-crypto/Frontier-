@@ -157,6 +157,46 @@ if(NOT ANDROID)
 endif()
 
 #------------------------------------------------------------------------------------------------------------------------
+#                                    PINNED ZSTD DECOMPRESSION (SOLIDARC .BLEND IMPORT)
+#------------------------------------------------------------------------------------------------------------------------
+
+set(ZSTD_ROOT "${CMAKE_SOURCE_DIR}/ExternalPackages/zstd")
+if(NOT EXISTS "${ZSTD_ROOT}/lib/zstd.h")
+    message(FATAL_ERROR "Pinned zstd not found at ${ZSTD_ROOT}. Run: python3 Automation/PrepareDependencies.py")
+endif()
+
+add_library(FrontierZstdDecompress STATIC
+    "${ZSTD_ROOT}/lib/common/debug.c"
+    "${ZSTD_ROOT}/lib/common/entropy_common.c"
+    "${ZSTD_ROOT}/lib/common/error_private.c"
+    "${ZSTD_ROOT}/lib/common/fse_decompress.c"
+    "${ZSTD_ROOT}/lib/common/pool.c"
+    "${ZSTD_ROOT}/lib/common/threading.c"
+    "${ZSTD_ROOT}/lib/common/xxhash.c"
+    "${ZSTD_ROOT}/lib/common/zstd_common.c"
+    "${ZSTD_ROOT}/lib/compress/fse_compress.c"
+    "${ZSTD_ROOT}/lib/compress/hist.c"
+    "${ZSTD_ROOT}/lib/compress/huf_compress.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_compress.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_compress_literals.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_compress_sequences.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_compress_superblock.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_double_fast.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_fast.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_lazy.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_ldm.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_opt.c"
+    "${ZSTD_ROOT}/lib/compress/zstd_preSplit.c"
+    "${ZSTD_ROOT}/lib/decompress/huf_decompress.c"
+    "${ZSTD_ROOT}/lib/decompress/zstd_ddict.c"
+    "${ZSTD_ROOT}/lib/decompress/zstd_decompress.c"
+    "${ZSTD_ROOT}/lib/decompress/zstd_decompress_block.c"
+)
+target_include_directories(FrontierZstdDecompress PUBLIC "${ZSTD_ROOT}/lib" "${ZSTD_ROOT}/lib/common" "${ZSTD_ROOT}/lib/compress")
+target_compile_definitions(FrontierZstdDecompress PRIVATE ZSTD_DISABLE_ASM=1)
+set_target_properties(FrontierZstdDecompress PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+#------------------------------------------------------------------------------------------------------------------------
 #                                               ENGINE RUNTIME LIBRARY
 #------------------------------------------------------------------------------------------------------------------------
 
@@ -190,6 +230,8 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Components/Controls/TextInputField.cpp
     Engine/Components/Controls/ConfirmationDialogue.cpp
     Engine/Components/Controls/NotificationSequence.cpp
+    Engine/Components/Controls/InspectorSectionPrimitives.cpp
+    Engine/Components/Controls/PolarDirectionDial.cpp
     Engine/Components/Docking/WorkspaceTabStrip.cpp
     Engine/Components/Docking/WorkspaceDockContainer.cpp
     Engine/Components/Panes/WorkspaceAppearance.cpp
@@ -230,6 +272,7 @@ set(FRONTIER_UI_COMPONENT_SOURCES
     Engine/Workspaces/ParametricSketcher/Interface/SketcherIcons.cpp
     Engine/Workspaces/ParametricSketcher/Interface/SketcherStyleSheet.cpp
     Engine/Workspaces/ParametricSketcher/Interface/SketcherOutliner.cpp
+    Engine/Workspaces/ParametricSketcher/Interface/SketcherProjectBrowser.cpp
     Engine/Workspaces/ParametricSketcher/Interface/SketcherOptions.cpp
     Engine/Workspaces/ParametricSketcher/Interface/SketcherNavigation.cpp
     Engine/Workspaces/ParametricSketcher/Interface/SketcherFileDialog.cpp
@@ -473,8 +516,12 @@ frontier_compile_sketcher_slang_shader(SketcherGrid.slang       SketcherGridVert
 frontier_compile_sketcher_slang_shader(SketcherGrid.slang       SketcherGridFragment           fragment SketcherGrid.frag.spv)
 frontier_compile_sketcher_slang_shader(SketcherImagePlane.slang SketcherImagePlaneVertex       vertex   SketcherImagePlane.vert.spv)
 frontier_compile_sketcher_slang_shader(SketcherImagePlane.slang SketcherImagePlaneFragment     fragment SketcherImagePlane.frag.spv)
-frontier_compile_sketcher_slang_shader(SketcherGizmo.slang      SketcherGizmoVertex            vertex   SketcherGizmo.vert.spv)
-frontier_compile_sketcher_slang_shader(SketcherGizmo.slang      SketcherGizmoFragment          fragment SketcherGizmo.frag.spv)
+frontier_compile_sketcher_slang_shader(SketcherGizmo.slang            SketcherGizmoVertex            vertex   SketcherGizmo.vert.spv)
+frontier_compile_sketcher_slang_shader(SketcherGizmo.slang            SketcherGizmoFragment          fragment SketcherGizmo.frag.spv)
+frontier_compile_sketcher_slang_shader(SketcherReferenceSurface.slang SketcherReferenceSurfaceVertex   vertex   SketcherReferenceSurface.vert.spv)
+frontier_compile_sketcher_slang_shader(SketcherReferenceSurface.slang SketcherReferenceSurfaceFragment fragment SketcherReferenceSurface.frag.spv)
+frontier_compile_sketcher_slang_shader(SketcherReferenceSurface.slang SketcherReferenceCreaseVertex    vertex   SketcherReferenceCrease.vert.spv)
+frontier_compile_sketcher_slang_shader(SketcherReferenceSurface.slang SketcherReferenceCreaseFragment  fragment SketcherReferenceCrease.frag.spv)
 
 function(frontier_compile_vector_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Vector/${SLANG_REL_PATH}")
@@ -803,6 +850,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Workspaces/ParametricSketcher/Viewport/SketcherRasterization.cpp
     Engine/Workspaces/ParametricSketcher/Viewport/SketcherSnapping.cpp
     Engine/Workspaces/ParametricSketcher/Viewport/SketcherSurfaceTracing.cpp
+    Engine/Workspaces/ParametricSketcher/Document/SketcherBlendDecoder.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherCurveImport.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherDocument.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherDocumentCodec.cpp
@@ -812,6 +860,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Workspaces/ParametricSketcher/Document/SketcherKnife.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherMatcap.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherMeasurement.cpp
+    Engine/Workspaces/ParametricSketcher/Document/SketcherReferenceSurface.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherScene.cpp
     Engine/Workspaces/ParametricSketcher/Document/SketcherSpecimen.cpp
     Engine/DistanceFieldSpace/LocalSignedDistanceVolume.cpp
@@ -950,6 +999,41 @@ if(FRONTIER_PROFILE STREQUAL "Editor")
     list(APPEND FRONTIER_ENGINE_SOURCES
         Engine/Editor/Explorer/ContentBrowser.cpp
         Engine/Editor/Explorer/ProjectBrowser.cpp
+        Engine/Editor/WorldEnvironmentRegistry.cpp
+        Engine/Editor/Inspectors/InspectorInstanceRegister.cpp
+        Engine/Editor/Inspectors/AtmosphereInspector.cpp
+        Engine/Editor/Inspectors/SolarInspector.cpp
+        Engine/Editor/Inspectors/CloudInspector.cpp
+        Engine/Editor/Inspectors/LocalCloudInspector.cpp
+        Engine/Editor/Inspectors/LunarInspector.cpp
+        Engine/Editor/Inspectors/StarfieldInspector.cpp
+        Engine/Editor/Inspectors/WindInspector.cpp
+        Engine/Editor/Inspectors/HeightFogInspector.cpp
+        Engine/Editor/Inspectors/AtmosphericFogInspector.cpp
+        Engine/Editor/Inspectors/LocalFogInspector.cpp
+        Engine/Editor/Inspectors/GodRaysInspector.cpp
+        Engine/Editor/Inspectors/PrecipitationInspector.cpp
+        Engine/Editor/Inspectors/RainbowInspector.cpp
+        Engine/Editor/Inspectors/CameraInspector.cpp
+        Engine/Editor/Inspectors/CameraSettingsInspector.cpp
+        Engine/Editor/Inspectors/LensFlareInspector.cpp
+        Engine/Editor/Inspectors/MotionBlurInspector.cpp
+        Engine/Editor/Inspectors/PointLightInspector.cpp
+        Engine/Editor/Inspectors/SpotLightInspector.cpp
+        Engine/Editor/Inspectors/IesLightInspector.cpp
+        Engine/Editor/Inspectors/AreaLightInspector.cpp
+        Engine/Editor/Inspectors/TubeLightInspector.cpp
+        Engine/Editor/Inspectors/LedLightInspector.cpp
+        Engine/Editor/Inspectors/LedStripInspector.cpp
+        Engine/Editor/Inspectors/EnvironmentLightInspector.cpp
+        Engine/Editor/Inspectors/PostProcessInspector.cpp
+        Engine/Editor/Inspectors/AnalyticPrimitiveInspector.cpp
+        Engine/Editor/Inspectors/NativeGeometryInspector.cpp
+        Engine/Editor/Inspectors/ImportedGeometryInspector.cpp
+        Engine/Editor/Inspectors/ProceduralGeometryInspector.cpp
+        Engine/Editor/Inspectors/ProjectInspectorFoundation.cpp
+        Engine/Editor/Inspectors/FolderInspector.cpp
+        Engine/Editor/Inspectors/InspectorRegistry.cpp
         Engine/Lifecycle/EditorLifecycle.cpp
     )
 endif()
@@ -1007,7 +1091,7 @@ target_compile_definitions(FrontierEngine PUBLIC
     "FRONTIER_REPO_ROOT_DIR=\"${CMAKE_SOURCE_DIR}\""
 )
 target_link_libraries(FrontierEngine PUBLIC FrontierSerialization FrontierCompileSettings thorvg_static Threads::Threads ${CMAKE_DL_LIBS})
-target_link_libraries(FrontierEngine PRIVATE Jolt)
+target_link_libraries(FrontierEngine PRIVATE Jolt FrontierZstdDecompress)
 if(WIN32)
     target_link_libraries(FrontierEngine PUBLIC ws2_32)
 endif()
@@ -1140,6 +1224,8 @@ if(BUILD_TESTING)
     frontier_register_exhibit(ControlCentreValidation                   Exhibits/ControlCentreValidation.cpp)
     frontier_register_exhibit(WorkspacePanesValidation                  Exhibits/WorkspacePanesValidation.cpp)
     if(FRONTIER_PROFILE STREQUAL "Editor")
+        frontier_register_exhibit(EnvironmentConstructValidation        Exhibits/EnvironmentConstructValidation.cpp)
+        frontier_register_exhibit(StandaloneInspectorsValidation        Exhibits/StandaloneInspectorsValidation.cpp)
         frontier_register_exhibit(LifecycleValidation                   Exhibits/LifecycleValidation.cpp)
     endif()
     frontier_register_exhibit(WorkspaceRevisionValidation               Exhibits/WorkspaceRevisionValidation.cpp)
@@ -1188,6 +1274,7 @@ if(BUILD_TESTING)
     target_link_libraries(SerializationValidation PRIVATE FrontierSerialization)
     add_test(NAME SerializationValidation COMMAND SerializationValidation)
 
+    frontier_register_exhibit(SketcherBlendImportValidation             Exhibits/ParametricSketcher/SketcherBlendImportValidation.cpp)
     frontier_register_exhibit(DataDrivenSpaceContentValidation          Exhibits/DataDrivenSpaceContentValidation.cpp)
     if(FRONTIER_PROFILE STREQUAL "Editor")
         frontier_register_exhibit(SketcherWorkspaceValidation           Exhibits/ParametricSketcher/SketcherWorkspaceValidation.cpp)
