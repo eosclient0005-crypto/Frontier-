@@ -944,6 +944,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ComponentClass/ComponentClassValidator.cpp
     Engine/ComponentClass/ComponentWorldPlacement.cpp
     Engine/ComponentClass/ControlVehicleClassBuilder.cpp
+    Engine/SimulationSpace/ForceFields/ForceModelRegistry.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
     Engine/SimulationSpace/PhysicsSpace/CollisionDetection.cpp
