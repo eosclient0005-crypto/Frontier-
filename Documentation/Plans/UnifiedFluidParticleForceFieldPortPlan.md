@@ -485,7 +485,9 @@ Every phase closes ONLY when its automated C++ validation executable passes `100
 | **S17** | `Engine/FluidShaders.js` `SceneFragment` (`L1129–L1384`) + `PostOverlayFragment` (`L1758–L1909`) | `Engine/Shaders/Fluid/{FluidVolumeRaymarch.slang,SimulationPostOverlay.slang}` + `Engine/SimulationSpace/Fluid/{FluidVolumeRenderer.{h,cpp},FluidSimulationPostOverlay.{h,cpp}}` | Wrenninge 3-octave scattering, 2-lobe HG, `1.35`-growth sun shadows, powder darkening, fire-lit smoke/floor, ACES tone transform, transparent flipbook bake, plus Heat Shimmer (`109`), Glitch (`217`), and Distortion (`218`) match `01_Startup_DefaultCampfire.png`. |
 | **S18** | `Engine/FluidShaders.js` `VectorVertex` (`L1385–L1422`) + `SliceVertex`/`Fragment` (`L1492–L1548`) + `TracerUpdate`/`Render` (`L951–L999`, `L1549–L1588`) + `DebrisUpdate`/`Render` (`L1589–L1740`) + `Engine/VolumeRenderer.js` gizmos (`L995–L1166`) + `Engine/SimulationCheckpoints.js` (`L1–L197`) + `Engine/PresetScenes.js` (`54` presets) | `Engine/Shaders/Fluid/{FluidTracerDebrisCompute.slang,FluidOverlayRasterization.slang}` + `Engine/SimulationSpace/EffectLayers/SimulationCheckpointRing.{h,cpp}` + `Engine/SimulationSpace/Fluid/FluidPresetRegistry.{h,cpp}` + `Exhibits/FluidSolverValidation.cpp` | `FluidSolverValidation` passes `100%`: all `54` `Presets/*.toml` load & step cleanly, `8,192` tracers & debris verified, `192 MiB` checkpoint ring rewind/scrub verified, `06_Fluid_InfiniteSparseGrid.png` parity verified, flipbook transparent PNG sheet exported. |
 
-### Stage E — Phase 4: Pure 1:1 Workspace UI via `Engine/Components/`
+### Stage E — Phase 4: Pure 1:1 Workspace UI via `Engine/Components/` *(⏸️ Deferred per User Directive — C++ & Headless Tests Only First)*
+
+> **User Scope Directive (`2026-11-23`)**: Stage E UI slices (`S19–S23`) are **paused/deferred** until the user finalizes UI design. Execution proceeds directly from **Stage D (`S18`)** to **Stage F (`S24–S28`)** in pure C++20 + `.slang` + headless validation tests.
 
 | Slice | Exact Upstream Reference (File & Lines) | Native Target(s) | Reference-Generated Oracle & Hard Pass Gate |
 | :---: | :--- | :--- | :--- |
