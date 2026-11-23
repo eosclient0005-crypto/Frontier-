@@ -60,6 +60,7 @@ void ComponentInstanceStorage::ResetWithSpatialOrigin(std::string_view OriginTit
     Arrows.clear();
     Vehicles.clear();
     Rotations.clear();
+    RigidBodies.clear();
 
     SlotEntry OriginSlot {};
     OriginSlot.Occupied                 = true;
@@ -123,6 +124,9 @@ uint32_t ComponentInstanceStorage::AllocateTypedSlot(ComponentCategory Category)
         case ComponentCategory::RotationalMotion:
             Rotations.emplace_back();
             return static_cast<uint32_t>(Rotations.size() - 1u);
+        case ComponentCategory::RigidBodyInstance:
+            RigidBodies.emplace_back();
+            return static_cast<uint32_t>(RigidBodies.size() - 1u);
     }
     return 0u;
 }
@@ -448,6 +452,9 @@ ComponentInstanceToken ComponentInstanceStorage::DuplicateInstance(ComponentInst
         case ComponentCategory::RotationalMotion:
             Rotations[CopyHeader->CategorySlotIndex] = Rotations[SourceHeader.CategorySlotIndex];
             break;
+        case ComponentCategory::RigidBodyInstance:
+            RigidBodies[CopyHeader->CategorySlotIndex] = RigidBodies[SourceHeader.CategorySlotIndex];
+            break;
         case ComponentCategory::SpatialOrigin:
         case ComponentCategory::TransformPivot:
             break;
@@ -538,6 +545,7 @@ FRONTIER_DEFINE_CATEGORY_ACCESSORS(Collision, CollisionVolume, Collisions, Colli
 FRONTIER_DEFINE_CATEGORY_ACCESSORS(Arrow, DirectionArrow, Arrows, DirectionArrowSettings)
 FRONTIER_DEFINE_CATEGORY_ACCESSORS(Vehicle, VehicleDynamics, Vehicles, VehicleDynamicsSettings)
 FRONTIER_DEFINE_CATEGORY_ACCESSORS(Rotation, RotationalMotion, Rotations, RotationalMotionSettings)
+FRONTIER_DEFINE_CATEGORY_ACCESSORS(RigidBody, RigidBodyInstance, RigidBodies, RigidBodyComponentSettings)
 
 #undef FRONTIER_DEFINE_CATEGORY_ACCESSORS
 
@@ -612,6 +620,7 @@ ClassSummaryMetrics ComponentInstanceStorage::ComputeSummaryMetrics() const noex
             case ComponentCategory::ConstraintInstance: ++Metrics.ConstraintCount; break;
             case ComponentCategory::LightInstance:      ++Metrics.LightCount;      break;
             case ComponentCategory::CollisionVolume:    ++Metrics.CollisionCount;  break;
+            case ComponentCategory::RigidBodyInstance:  ++Metrics.RigidBodyCount;  break;
             case ComponentCategory::VehicleDynamics:
             case ComponentCategory::RotationalMotion:   ++Metrics.BehaviourCount;  break;
             default: break;

@@ -133,6 +133,19 @@ std::vector<ClassDiagnosticIssue> ComponentClassValidator::ValidateClass(
                 });
             }
         }
+        else if (Header->Category == ComponentCategory::RigidBodyInstance)
+        {
+            const RigidBodyComponentSettings* Rb = Storage.InspectRigidBody(Header->Token);
+            if (Rb != nullptr && Rb->MotionKind == RigidBodyMotionKind::Dynamic
+                && Rb->ExplicitMassKg <= 0.0f && Rb->DensityKgPerM3 <= 0.0f)
+            {
+                Issues.push_back({
+                    DiagnosticSeverity::Error,
+                    Header->Token,
+                    Header->Title + ": dynamic rigid body requires positive ExplicitMassKg or DensityKgPerM3.",
+                });
+            }
+        }
     }
 
     return Issues;

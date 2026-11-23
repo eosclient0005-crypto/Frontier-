@@ -70,8 +70,9 @@ const char* QueryCategorySubtitle(
         case Cat::CameraInstance:   return "Camera";
         case Cat::CollisionVolume:  return "Box trigger";
         case Cat::DirectionArrow:   return "DirectionArrow";
-        case Cat::VehicleDynamics:  return "VehicleDynamics";
-        case Cat::RotationalMotion: return "RotationalMotion";
+        case Cat::VehicleDynamics:   return "VehicleDynamics";
+        case Cat::RotationalMotion:  return "RotationalMotion";
+        case Cat::RigidBodyInstance: return "RigidBody";
     }
     return "Component";
 }
@@ -85,6 +86,7 @@ ColorRgba QueryCategoryAccentTint(ComponentClass::ComponentCategory Cat) noexcep
         case C::ConstraintInstance: return { 100u, 182u, 255u, 255u };
         case C::LightInstance:      return { 255u, 210u, 110u, 255u };
         case C::CollisionVolume:    return { 255u, 178u,  56u, 255u };
+        case C::RigidBodyInstance:  return { 118u, 196u, 232u, 255u };
         case C::VehicleDynamics:    return {  88u, 214u, 141u, 255u };
         case C::CameraInstance:     return { 144u, 184u, 255u, 255u };
         default:                    return { 176u, 180u, 190u, 255u };
@@ -106,6 +108,7 @@ ControlIcon QueryCategoryControlIcon(ComponentClass::ComponentCategory Cat) noex
         case C::DirectionArrow:     return ControlIcon::MoveArrows;
         case C::VehicleDynamics:    return ControlIcon::GaugeRate;
         case C::RotationalMotion:   return ControlIcon::RefreshCycle;
+        case C::RigidBodyInstance:  return ControlIcon::VolumeBoxes;
     }
     return ControlIcon::CubeShape;
 }

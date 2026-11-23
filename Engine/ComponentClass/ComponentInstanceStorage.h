@@ -32,6 +32,7 @@ struct ClassSummaryMetrics
     uint32_t ConstraintCount    = 0u; // [cnt] - Live ConstraintInstance count
     uint32_t LightCount         = 0u; // [cnt] - Live LightInstance count
     uint32_t CollisionCount     = 0u; // [cnt] - Live CollisionVolume count
+    uint32_t RigidBodyCount     = 0u; // [cnt] - Live RigidBodyInstance count
     uint32_t BehaviourCount     = 0u; // [cnt] - Live VehicleDynamics + RotationalMotion count
 };
 
@@ -77,6 +78,8 @@ public:
     [[nodiscard]] const VehicleDynamicsSettings*    InspectVehicle(ComponentInstanceToken Token) const noexcept;
     [[nodiscard]] RotationalMotionSettings*         ResolveRotation(ComponentInstanceToken Token) noexcept;
     [[nodiscard]] const RotationalMotionSettings*   InspectRotation(ComponentInstanceToken Token) const noexcept;
+    [[nodiscard]] RigidBodyComponentSettings*       ResolveRigidBody(ComponentInstanceToken Token) noexcept;
+    [[nodiscard]] const RigidBodyComponentSettings* InspectRigidBody(ComponentInstanceToken Token) const noexcept;
 
     void WalkSpatialNesting(const std::function<void(const ComponentInstanceHeader&)>& Visitor) const;
     void CollectBehaviourTokens(std::vector<ComponentInstanceToken>& OutTokens) const;
@@ -108,6 +111,7 @@ private:
     std::vector<DirectionArrowSettings>      Arrows       {};
     std::vector<VehicleDynamicsSettings>     Vehicles     {};
     std::vector<RotationalMotionSettings>    Rotations    {};
+    std::vector<RigidBodyComponentSettings>  RigidBodies  {};
 
     [[nodiscard]] uint32_t    AllocateTypedSlot(ComponentCategory Category);
     [[nodiscard]] std::string ConstructUniqueTitle(std::string_view Desired) const;

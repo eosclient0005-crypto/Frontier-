@@ -10,6 +10,7 @@
 #if FRONTIER_EDITOR_ENABLED
 
 #include "Engine/Components/Controls/CapsuleButton.h"
+#include "Engine/SimulationSpace/PhysicsSpace/PhysicsDebugLog.h"
 
 #include <imgui.h>
 
@@ -2979,6 +2980,27 @@ void EditorLifecycle::RecordFramePresentationTiming(
     if (WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes())
     {
         Panes->Viewport.ConfigureViewportTimingBreakdown(LatestViewportTiming);
+
+        // Keep F3 Physics & Vehicle diagnostics synced with the thread-safe PhysicsDebugLog journal
+        auto& PhysJournal = SimulationSpace::PhysicsSpace::PhysicsDebugLog::AccessSharedJournal();
+        const uint64_t SeqNow = PhysJournal.QueryTotalEmittedCount();
+        PhysicsTelemetryReading PhysTel = Panes->Viewport.QueryLastPhysicsTelemetry();
+        if (SeqNow != PhysTel.DebugLogSequence)
+        {
+            PhysTel.DebugLogSequence = SeqNow;
+            const auto RecentLogs = PhysJournal.CopyRecentEntries(4u);
+            PhysTel.RecentLogLines.clear();
+            for (const auto& Entry : RecentLogs)
+            {
+                PhysTel.RecentLogLines.push_back(SimulationSpace::PhysicsSpace::PhysicsDebugLog::FormatEntryLine(Entry));
+            }
+            if (!PhysTel.RecentLogLines.empty())
+            {
+                PhysTel.LatestLogSummary = PhysTel.RecentLogLines.back();
+            }
+            Panes->Viewport.ConfigurePhysicsTelemetry(PhysTel);
+        }
+
         RefreshOutlinerFooterTelemetry();
         const auto& Disp = Panes->Viewport.QueryDisplaySettings();
         const uint64_t DispRev =

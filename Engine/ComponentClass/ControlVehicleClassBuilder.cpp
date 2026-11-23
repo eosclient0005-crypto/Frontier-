@@ -605,6 +605,24 @@ bool ControlVehicleClassBuilder::ConstructFromControlledIntegrator(
         Col->TriggerOverlapOnly = true;
     }
 
+    // Chassis Jolt RigidBody component (paired with baked CompoundHull from ControlledIntegrator.GeometrySpace)
+    const ComponentInstanceToken ChassisBodyComp = Def.Storage.AppendInstance(
+        ComponentCategory::RigidBodyInstance,
+        "ChassisRigidBody",
+        Body,
+        ComponentTransform{});
+    if (RigidBodyComponentSettings* Rb = Def.Storage.ResolveRigidBody(ChassisBodyComp))
+    {
+        Rb->MotionKind        = RigidBodyMotionKind::Dynamic;
+        Rb->ExplicitMassKg    = 1300.0f;
+        Rb->LinearDamping     = 0.01f;
+        Rb->AngularDamping    = 0.08f;
+        Rb->CollisionChannel  = 2u;
+        Rb->CollideWithMask   = 0xFFFFFFFFu;
+        Rb->PhysicsMaterialId = 0u;
+        Rb->AllowSleep        = false;
+    }
+
     // VehicleDynamics behaviour
     const ComponentInstanceToken Vehicle = Def.Storage.AppendInstance(
         ComponentCategory::VehicleDynamics,
