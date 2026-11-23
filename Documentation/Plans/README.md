@@ -8,7 +8,7 @@
 
 | Plan Document | Domain |
 | :--- | :--- |
-| [CrossThreadPhysicsConstraintPlan.md](CrossThreadPhysicsConstraintPlan.md) | **🟢 Completion Report (`2026-11-23`)**: Generic wait-free multi-reader `PublishedSnapshotExchange`, `ThreadBoundaryExchange`, dedicated `PhysicsThread`, and all 8 `ProjectZeroEditor`-parity Jolt physics constraints |
+| [CrossThreadPhysicsConstraintPlan.md](CrossThreadPhysicsConstraintPlan.md) | **🟢 Completion Report (`2026-11-23`)**: Generic wait-free multi-reader `PublishedReadingExchange`, `ThreadBoundaryExchange`, dedicated `PhysicsThread`, and all 8 `ProjectZeroEditor`-parity Jolt physics constraints |
 | [ProjectLifecyclePolicyPlan.md](ProjectLifecyclePolicyPlan.md) | **🟢 Active Plan (`2026-11-23`)**: `Projects/` root, reference lean project `Projects/Untitled/` (`UntitledLifecycle`), tight zero-Editor `RuntimeLifecycle` fixed-step loop, `ProjectExecutionPolicy`, `GameplayRulePolicy`, and `DeterministicDrivingPolicy` |
 | [SerializationArchitecturePlan.md](SerializationArchitecturePlan.md) | **🟢 Active Plan (`2026-11-23`)**: `*Space` Stratification Rule, 5–6 alternatives across all 15 general-purpose categories, embedded multi-pillar `.Instance`/`.WorldSpace`/`.ParticleSpace` containers, `Engine/Serialization/` layout, persistent `DependencyOrder` & hardcoded showcase removal |
 | [ExperimentalEditorUiPortPlan.md](ExperimentalEditorUiPortPlan.md) | Proposed editor-only HTML-to-native UI parity plan, reusable components, visual evidence and production isolation |
@@ -27,7 +27,7 @@
 | [MaterialVisibilityRenderingBringupPlan.md](MaterialVisibilityRenderingBringupPlan.md) | 10-lobe `MaterialSpace`, 64-bit VisBuffer & direct rendering bringup |
 | [DynamicMaterialSystemPlan.md](DynamicMaterialSystemPlan.md) | Time-varying procedural/transition OpenPBR material compiler |
 | [CelestialSkyCloudsSystemPlan.md](CelestialSkyCloudsSystemPlan.md) | Physical 3-LUT sky, solar/lunar ephemeris & single-source `PlanetaryClouds` |
-| [NetworkingPolicyBringupPlan.md](NetworkingPolicyBringupPlan.md) | UDP/TCP socket transport & snapshot replication policy |
+| [NetworkingPolicyBringupPlan.md](NetworkingPolicyBringupPlan.md) | UDP/TCP socket transport & reading replication policy |
 | [RemediationInputCameraPlan.md](RemediationInputCameraPlan.md) | Input exchange & orbit/fly camera remediation |
 
 ---
