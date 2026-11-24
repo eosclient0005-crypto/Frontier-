@@ -136,6 +136,18 @@
         <button class="btn warn" id="btnTyreDrop">Drop Impact Test</button>
         <button class="btn" id="btnTyreCurb">Roll Over Curb</button>
       </div>
+      <div id="femControls" style="display:none;flex-direction:column;gap:7px;margin-top:6px;padding-top:7px;border-top:1px solid rgba(86,182,255,0.22);">
+        <div class="sec-title" style="color:#4ade80;">3D Neo-Hookean FEM Rubber</div>
+        <div class="slider-row">
+          <div class="slider-hdr"><span>Young's Modulus (E)</span><span class="val" id="vFemYoung">2.4 MPa</span></div>
+          <input type="range" id="sFemYoung" min="0.4" max="7.0" step="0.1" value="2.4"/>
+        </div>
+        <div class="slider-row">
+          <div class="slider-hdr"><span>Poisson's Ratio (&nu;)</span><span class="val" id="vFemPoisson">0.44</span></div>
+          <input type="range" id="sFemPoisson" min="0.15" max="0.48" step="0.01" value="0.44"/>
+        </div>
+        <label class="chk" style="margin-top:1px;"><input type="checkbox" id="cFemHeatmap"/> FEM 3D Strain Heatmap</label>
+      </div>
     </div>
 
     <div class="section">
@@ -503,6 +515,14 @@ class XpbdWorld {
     this.bendCons = [];
     // Posture target anchors (gentle spring toward rest shape for botanical stalks/fronds so they spring back!)
     this.postureCons = []; // {i, tx, ty, tz, stiffness}
+    // 3D Volumetric Neo-Hookean FEM Tetrahedral Elements (Macklin & Müller 2021 Stable Neo-Hookean XPBD)
+    this._tets = [];       // temporary build list: [p0, p1, p2, p3]
+    this.tetCount = 0;
+    this.tetIdx = null;    // Int32Array(4 * tetCount)
+    this.tetQ = null;      // Float32Array(9 * tetCount): inverse rest shape matrix Dm^-1 (col-major)
+    this.tetVol = null;    // Float32Array(tetCount): rest signed volume V0 > 0
+    this.tetStrain = null; // Float32Array(tetCount): live Von Mises + volumetric strain for heatmap
+    this.nodeStrain = null;// Float32Array(n): averaged nodal strain for smooth 3D mesh heatmap
 
     // Procedural 3D mesh descriptors bound directly to XPBD particle indices!
     // Each descriptor reads LIVE this.pos[] every frame to skin 3D lit triangles!
@@ -511,7 +531,8 @@ class XpbdWorld {
     this.leaves = [];     // {pIdx, nextIdx, side, angleOff, length, width, arch, colBase, colTip, mat, shape}
     this.beads = [];      // {pIdx, radius, offset:[0,0,0], col, mat} (dewdrops, kelp gas bladders, insulators, cattail tips)
     this.clothGrids = []; // {cols, rows, startIdx, colA, colB, mat}
-    this.tyres = [];      // Pneumatic XPBD tires: {startIdx, sectors, profile, hubX, hubY, hubZ, hubVy, spinAngle, rimR, outerR, beadZ, restVol, baseOffsets}
+    this.tyres = [];      // Pneumatic XPBD tires
+    this.femTyres = [];   // 3D Volumetric Tetrahedral Neo-Hookean FEM Tires
     this.staticProps = []; // {type, pos, scale, col, mat} (posts, reef rocks, flag pole)
 
     this.tornCount = 0;
@@ -562,6 +583,18 @@ class XpbdWorld {
     this.postureCons.push({ i, tx: this._pos[i*3], ty: this._pos[i*3+1], tz: this._pos[i*3+2], stiffness });
   }
 
+  addTet(p0, p1, p2, p3) {
+    // Check signed rest volume det([x1-x0, x2-x0, x3-x0]) / 6 and ensure positive orientation!
+    const x0 = this._pos[p0*3], y0 = this._pos[p0*3+1], z0 = this._pos[p0*3+2];
+    const e1x = this._pos[p1*3]-x0, e1y = this._pos[p1*3+1]-y0, e1z = this._pos[p1*3+2]-z0;
+    const e2x = this._pos[p2*3]-x0, e2y = this._pos[p2*3+1]-y0, e2z = this._pos[p2*3+2]-z0;
+    const e3x = this._pos[p3*3]-x0, e3y = this._pos[p3*3+1]-y0, e3z = this._pos[p3*3+2]-z0;
+    const det = e1x*(e2y*e3z - e2z*e3y) - e2x*(e1y*e3z - e1z*e3y) + e3x*(e1y*e2z - e1z*e2y);
+    if (Math.abs(det) < 1e-8) return;
+    if (det < 0) this._tets.push(p0, p1, p3, p2);
+    else         this._tets.push(p0, p1, p2, p3);
+  }
+
   finalize() {
     this.pos = new Float32Array(this._pos);
     this.prev = new Float32Array(this._pos);
@@ -572,7 +605,156 @@ class XpbdWorld {
     this.aeroScale = new Float32Array(this._aero);
     this.lambdaDist = new Float32Array(this.distCons.length);
     this.lambdaBend = new Float32Array(this.bendCons.length);
+
+    // Precompute 3D FEM inverse rest shape matrices Q = Dm^-1 and rest volumes V0 > 0
+    this.tetCount = this._tets.length / 4;
+    this.tetIdx = new Int32Array(this._tets);
+    this.tetQ = new Float32Array(this.tetCount * 9);
+    this.tetVol = new Float32Array(this.tetCount);
+    this.tetStrain = new Float32Array(this.tetCount);
+    this.nodeStrain = new Float32Array(this.n);
+    for (let t = 0; t < this.tetCount; t++) {
+      const i0 = this.tetIdx[t*4], i1 = this.tetIdx[t*4+1], i2 = this.tetIdx[t*4+2], i3 = this.tetIdx[t*4+3];
+      const x0 = this.pos[i0*3], y0 = this.pos[i0*3+1], z0 = this.pos[i0*3+2];
+      // Columns of Dm: c0 = x1-x0, c1 = x2-x0, c2 = x3-x0
+      const a00 = this.pos[i1*3]-x0, a10 = this.pos[i1*3+1]-y0, a20 = this.pos[i1*3+2]-z0;
+      const a01 = this.pos[i2*3]-x0, a11 = this.pos[i2*3+1]-y0, a21 = this.pos[i2*3+2]-z0;
+      const a02 = this.pos[i3*3]-x0, a12 = this.pos[i3*3+1]-y0, a22 = this.pos[i3*3+2]-z0;
+      const det = a00*(a11*a22 - a12*a21) - a01*(a10*a22 - a12*a20) + a02*(a10*a21 - a11*a20);
+      this.tetVol[t] = Math.abs(det) / 6.0;
+      const invD = 1.0 / det;
+      const o = t * 9;
+      // Row-major entries of Q = Dm^-1: q[r*3 + c]
+      this.tetQ[o+0] = (a11*a22 - a12*a21) * invD;
+      this.tetQ[o+1] = (a02*a21 - a01*a22) * invD;
+      this.tetQ[o+2] = (a01*a12 - a02*a11) * invD;
+      this.tetQ[o+3] = (a12*a20 - a10*a22) * invD;
+      this.tetQ[o+4] = (a00*a22 - a02*a20) * invD;
+      this.tetQ[o+5] = (a02*a10 - a00*a12) * invD;
+      this.tetQ[o+6] = (a10*a21 - a11*a20) * invD;
+      this.tetQ[o+7] = (a01*a20 - a00*a21) * invD;
+      this.tetQ[o+8] = (a00*a11 - a01*a10) * invD;
+    }
+    this._tets = null;
     this._pos = this._rest = this._invMass = this._radius = this._aero = null;
+  }
+
+  // Macklin & Müller (2021) Stable Neo-Hookean 3D Volumetric FEM Tetrahedron Solver!
+  solveNeoHookeanTets(invH2, cfg) {
+    const T = this.tetCount;
+    if (T === 0) return;
+    const pos = this.pos, invM = this.invMass, idx = this.tetIdx, Q = this.tetQ, V = this.tetVol;
+    // Convert Young's Modulus (MPa -> sim stiffness scale) & Poisson's Ratio nu -> Lamé parameters (mu, lambda)
+    const E = Math.max(0.15, cfg.femYoung) * 2800.0;
+    const nu = Math.max(0.10, Math.min(0.485, cfg.femPoisson));
+    const mu = E / (2.0 * (1.0 + nu));
+    const lambda = (E * nu) / ((1.0 + nu) * (1.0 - 2.0 * nu));
+    const gamma = 1.0 + mu / lambda;
+    const grab = this.grabIdx;
+
+    for (let t = 0; t < T; t++) {
+      const t4 = t * 4;
+      const i0 = idx[t4], i1 = idx[t4+1], i2 = idx[t4+2], i3 = idx[t4+3];
+      const w0 = (i0 === grab) ? 0 : invM[i0];
+      const w1 = (i1 === grab) ? 0 : invM[i1];
+      const w2 = (i2 === grab) ? 0 : invM[i2];
+      const w3 = (i3 === grab) ? 0 : invM[i3];
+      if (w0 + w1 + w2 + w3 <= 0) continue;
+
+      const p0 = i0*3, p1 = i1*3, p2 = i2*3, p3 = i3*3;
+      const x0 = pos[p0], y0 = pos[p0+1], z0 = pos[p0+2];
+      // Ds columns: d0=p1-p0, d1=p2-p0, d2=p3-p0
+      const d00 = pos[p1]-x0, d10 = pos[p1+1]-y0, d20 = pos[p1+2]-z0;
+      const d01 = pos[p2]-x0, d11 = pos[p2+1]-y0, d21 = pos[p2+2]-z0;
+      const d02 = pos[p3]-x0, d12 = pos[p3+1]-y0, d22 = pos[p3+2]-z0;
+
+      const o = t * 9;
+      const q00=Q[o],   q01=Q[o+1], q02=Q[o+2];
+      const q10=Q[o+3], q11=Q[o+4], q12=Q[o+5];
+      const q20=Q[o+6], q21=Q[o+7], q22=Q[o+8];
+
+      // F = Ds * Q (columns f0, f1, f2)
+      const f00 = d00*q00 + d01*q10 + d02*q20;
+      const f10 = d10*q00 + d11*q10 + d12*q20;
+      const f20 = d20*q00 + d21*q10 + d22*q20;
+
+      const f01 = d00*q01 + d01*q11 + d02*q21;
+      const f11 = d10*q01 + d11*q11 + d12*q21;
+      const f21 = d20*q01 + d21*q11 + d22*q21;
+
+      const f02 = d00*q02 + d01*q12 + d02*q22;
+      const f12 = d10*q02 + d11*q12 + d12*q22;
+      const f22 = d20*q02 + d21*q12 + d22*q22;
+
+      const vol = V[t];
+
+      // --- (A) Deviatoric Shear Constraint C_D = sqrt(tr(F^T F)) ---
+      const ic = f00*f00 + f10*f10 + f20*f20 + f01*f01 + f11*f11 + f21*f21 + f02*f02 + f12*f12 + f22*f22;
+      const cD = Math.sqrt(Math.max(1e-10, ic));
+      const invCD = 1.0 / cD;
+      // G = (1/cD) * F * Q^T -> columns g1, g2, g3
+      const g1x = (f00*q00 + f01*q01 + f02*q02) * invCD;
+      const g1y = (f10*q00 + f11*q01 + f12*q02) * invCD;
+      const g1z = (f20*q00 + f21*q01 + f22*q02) * invCD;
+
+      const g2x = (f00*q10 + f01*q11 + f02*q12) * invCD;
+      const g2y = (f10*q10 + f11*q11 + f12*q12) * invCD;
+      const g2z = (f20*q10 + f21*q11 + f22*q12) * invCD;
+
+      const g3x = (f00*q20 + f01*q21 + f02*q22) * invCD;
+      const g3y = (f10*q20 + f11*q21 + f12*q22) * invCD;
+      const g3z = (f20*q20 + f21*q21 + f22*q22) * invCD;
+
+      const g0x = -(g1x + g2x + g3x), g0y = -(g1y + g2y + g3y), g0z = -(g1z + g2z + g3z);
+      const denomD = w0*(g0x*g0x+g0y*g0y+g0z*g0z) + w1*(g1x*g1x+g1y*g1y+g1z*g1z)
+                   + w2*(g2x*g2x+g2y*g2y+g2z*g2z) + w3*(g3x*g3x+g3y*g3y+g3z*g3z)
+                   + invH2 / (mu * vol);
+      if (denomD > 1e-12) {
+        const dlD = -cD / denomD;
+        if (w0 > 0) { pos[p0]+=dlD*w0*g0x; pos[p0+1]+=dlD*w0*g0y; pos[p0+2]+=dlD*w0*g0z; }
+        if (w1 > 0) { pos[p1]+=dlD*w1*g1x; pos[p1+1]+=dlD*w1*g1y; pos[p1+2]+=dlD*w1*g1z; }
+        if (w2 > 0) { pos[p2]+=dlD*w2*g2x; pos[p2+1]+=dlD*w2*g2y; pos[p2+2]+=dlD*w2*g2z; }
+        if (w3 > 0) { pos[p3]+=dlD*w3*g3x; pos[p3+1]+=dlD*w3*g3y; pos[p3+2]+=dlD*w3*g3z; }
+      }
+
+      // --- (B) Hydrostatic Volume-Preservation Constraint C_H = det(F) - (1 + mu/lambda) ---
+      // Re-read updated vertices for Gauss-Seidel stability
+      const ux0 = pos[p0], uy0 = pos[p0+1], uz0 = pos[p0+2];
+      const e00 = pos[p1]-ux0, e10 = pos[p1+1]-uy0, e20 = pos[p1+2]-uz0;
+      const e01 = pos[p2]-ux0, e11 = pos[p2+1]-uy0, e21 = pos[p2+2]-uz0;
+      const e02 = pos[p3]-ux0, e12 = pos[p3+1]-uy0, e22 = pos[p3+2]-uz0;
+
+      const h00 = e00*q00 + e01*q10 + e02*q20, h10 = e10*q00 + e11*q10 + e12*q20, h20 = e20*q00 + e21*q10 + e22*q20;
+      const h01 = e00*q01 + e01*q11 + e02*q21, h11 = e10*q01 + e11*q11 + e12*q21, h21 = e20*q01 + e21*q11 + e22*q21;
+      const h02 = e00*q02 + e01*q12 + e02*q22, h12 = e10*q02 + e11*q12 + e12*q22, h22 = e20*q02 + e21*q12 + e22*q22;
+
+      // Cofactor columns of F: cf0 = f1 x f2, cf1 = f2 x f0, cf2 = f0 x f1
+      const c00 = h11*h22 - h21*h12, c10 = h21*h02 - h01*h22, c20 = h01*h12 - h11*h02;
+      const c01 = h12*h20 - h22*h10, c11 = h22*h00 - h02*h20, c21 = h02*h10 - h12*h00;
+      const c02 = h10*h21 - h20*h11, c12 = h20*h01 - h00*h21, c22 = h00*h11 - h10*h01;
+
+      const J = h00*c00 + h10*c10 + h20*c20;
+      const cH = J - gamma;
+
+      // Store live 3D Von Mises + volumetric strain magnitude for real-time scientific heatmap!
+      this.tetStrain[t] = Math.abs(cD - 1.7320508) * 1.8 + Math.abs(J - 1.0) * 2.4;
+
+      const j1x = c00*q00 + c01*q01 + c02*q02, j1y = c10*q00 + c11*q01 + c12*q02, j1z = c20*q00 + c21*q01 + c22*q02;
+      const j2x = c00*q10 + c01*q11 + c02*q12, j2y = c10*q10 + c11*q11 + c12*q12, j2z = c20*q10 + c21*q11 + c22*q12;
+      const j3x = c00*q20 + c01*q21 + c02*q22, j3y = c10*q20 + c11*q21 + c12*q22, j3z = c20*q20 + c21*q21 + c22*q22;
+      const j0x = -(j1x + j2x + j3x), j0y = -(j1y + j2y + j3y), j0z = -(j1z + j2z + j3z);
+
+      const denomH = w0*(j0x*j0x+j0y*j0y+j0z*j0z) + w1*(j1x*j1x+j1y*j1y+j1z*j1z)
+                   + w2*(j2x*j2x+j2y*j2y+j2z*j2z) + w3*(j3x*j3x+j3y*j3y+j3z*j3z)
+                   + invH2 / (lambda * vol);
+      if (denomH > 1e-12) {
+        const dlH = -cH / denomH;
+        if (w0 > 0) { pos[p0]+=dlH*w0*j0x; pos[p0+1]+=dlH*w0*j0y; pos[p0+2]+=dlH*w0*j0z; }
+        if (w1 > 0) { pos[p1]+=dlH*w1*j1x; pos[p1+1]+=dlH*w1*j1y; pos[p1+2]+=dlH*w1*j1z; }
+        if (w2 > 0) { pos[p2]+=dlH*w2*j2x; pos[p2+1]+=dlH*w2*j2y; pos[p2+2]+=dlH*w2*j2z; }
+        if (w3 > 0) { pos[p3]+=dlH*w3*j3x; pos[p3+1]+=dlH*w3*j3y; pos[p3+2]+=dlH*w3*j3z; }
+      }
+    }
   }
 
   step(dtFrame, cfg, timeSec, windPulse) {
@@ -698,6 +880,101 @@ class XpbdWorld {
         }
       }
 
+      // 0b. 3D Volumetric Neo-Hookean FEM Tire: rotating rim beads + inner cavity pneumatic pressure + axle load
+      for (const ft of this.femTyres) {
+        const S = ft.sectors, P = ft.profile, base = ft.startIdx;
+        const spin = cfg.tyreSpin;
+        ft.spinAngle += spin * h;
+        const hx = ft.hubX, hy = ft.hubY, hz = ft.hubZ;
+
+        // Compute current inner-cavity pneumatic volume for Boyle's-law air spring!
+        let curVol = 0.0;
+        for (let si = 0; si < S; si++) {
+          const sNext = (si + 1) % S;
+          for (let pi = 0; pi < P - 1; pi++) {
+            const i00 = base + (si * P + pi) * 2;
+            const i10 = base + (sNext * P + pi) * 2;
+            const i11 = base + (sNext * P + pi + 1) * 2;
+            const i01 = base + (si * P + pi + 1) * 2;
+            const a3 = i00*3, b3 = i10*3, c3 = i11*3, d3 = i01*3;
+            const ux = pos[c3]-pos[a3], uy = pos[c3+1]-pos[a3+1], uz = pos[c3+2]-pos[a3+2];
+            const vx = pos[d3]-pos[b3], vy = pos[d3+1]-pos[b3+1], vz = pos[d3+2]-pos[b3+2];
+            let nx = 0.5*(uy*vz - uz*vy), ny = 0.5*(uz*vx - ux*vz), nz = 0.5*(ux*vy - uy*vx);
+            const mx = 0.25*(pos[a3]+pos[b3]+pos[c3]+pos[d3]) - hx;
+            const my = 0.25*(pos[a3+1]+pos[b3+1]+pos[c3+1]+pos[d3+1]) - hy;
+            const mz = 0.25*(pos[a3+2]+pos[b3+2]+pos[c3+2]+pos[d3+2]) - hz;
+            const rl = Math.hypot(mx, my) || 1;
+            if (nx*(mx - (mx/rl)*ft.rimR) + ny*(my - (my/rl)*ft.rimR) + nz*mz < 0) { nx=-nx; ny=-ny; nz=-nz; }
+            curVol += (mx*nx + my*ny + mz*nz) * (1.0 / 3.0);
+          }
+        }
+        const boyle = Math.max(0.85, Math.min(2.0, ft.restVol / Math.max(ft.restVol * 0.35, curVol)));
+
+        // Axle load & pneumatic/rubber suspension support
+        let supportTopY = this.groundY;
+        if (colOn) {
+          const dxC = hx - cx, dzC = hz - cz;
+          if (Math.hypot(dxC, dzC) < cr + ft.outerR * 0.72) {
+            const bumpH = cy + Math.sqrt(Math.max(0, (cr + 0.04)*(cr + 0.04) - dxC*dxC * 0.45));
+            if (bumpH > supportTopY) supportTopY = bumpH;
+          }
+        }
+        const deflection = Math.max(0.0, (supportTopY + ft.outerR) - ft.hubY);
+        const kHub = 16.0 + cfg.tyrePsi * 2.55 * boyle + cfg.femYoung * 9.5;
+        const cHub = 10.5 + cfg.tyrePsi * 0.16;
+        const springUp = deflection > 0.0 ? (deflection * kHub - ft.hubVy * cHub) : (-ft.hubVy * 0.5);
+        const axleForce = -cfg.tyreLoad * 18.5 + Math.max(0.0, springUp) - (deflection <= 0 ? ft.hubVy * 0.35 : 0);
+        ft.hubVy += axleForce * h;
+        ft.hubY  += ft.hubVy * h;
+        const minHubY = supportTopY + ft.rimR + 0.06;
+        if (ft.hubY < minHubY) {
+          ft.hubY = minHubY;
+          if (ft.hubVy < 0) ft.hubVy = -ft.hubVy * 0.16;
+        }
+
+        // Rigidly clamp inner & outer bead nodes (pi = 0, pi = P-1, both wall layers L=0,1) onto rotating alloy rim
+        // AND apply true internal air pressure (PSI) outward on the inner cavity surface (L=0)!
+        const pressGain = (cfg.tyrePsi * 1.45) * boyle;
+        const innerPts = ft.innerPts, outerPts = ft.outerPts;
+        for (let si = 0; si < S; si++) {
+          const a = (si / S) * Math.PI * 2 + ft.spinAngle;
+          const ca = Math.cos(a), sa = Math.sin(a);
+          for (let pi = 0; pi < P; pi++) {
+            for (let lay = 0; lay < 2; lay++) {
+              const pid = base + (si * P + pi) * 2 + lay;
+              const p3 = pid * 3;
+              const [r0, z0] = (lay === 0) ? innerPts[pi] : outerPts[pi];
+              if (pi === 0 || pi === P - 1) {
+                pos[p3]   = ft.hubX + ca * r0;
+                pos[p3+1] = ft.hubY + sa * r0;
+                pos[p3+2] = ft.hubZ + z0;
+                prev[p3]  = pos[p3]; prev[p3+1] = pos[p3+1]; prev[p3+2] = pos[p3+2];
+                continue;
+              }
+              // Co-rotating spin drive coupling + viscoelastic rubber damping (zero twist!)
+              const tx = ft.hubX + ca * r0;
+              const tyT = ft.hubY + sa * r0;
+              const tz = ft.hubZ + z0;
+              const targetVx = -sa * r0 * spin;
+              const targetVy =  ca * r0 * spin + ft.hubVy;
+              // Gentle pneumatic air-cavity pressure on inner liner (lay === 0)
+              if (lay === 0) {
+                const ox = ca * (r0 - ft.rimR), oy = sa * (r0 - ft.rimR), oz = z0;
+                const ol = Math.hypot(ox, oy, oz) || 1;
+                vel[p3]   += (ox / ol) * pressGain * 0.28 * h;
+                vel[p3+1] += (oy / ol) * pressGain * 0.28 * h;
+                vel[p3+2] += (oz / ol) * pressGain * 0.28 * h;
+              }
+              // Gentle co-rotating gyroscopic stabilization (keeps 3D FEM torus aligned while letting FEM tets deform freely!)
+              const kGuide = 45.0 + cfg.tyrePsi * 3.2;
+              vel[p3]   += ((tx - pos[p3]) * kGuide + (targetVx - vel[p3]) * 14.0) * h;
+              vel[p3+1] += ((tyT - pos[p3+1]) * kGuide + (targetVy - vel[p3+1]) * 14.0) * h;
+              vel[p3+2] += ((tz - pos[p3+2]) * (kGuide * 0.35) - vel[p3+2] * 14.0) * h;
+            }
+          }
+        }
+      }
+
       // 1. External forces + Symplectic predict
       for (let i = 0; i < n; i++) {
         const w = invM[i];
@@ -808,6 +1085,11 @@ class XpbdWorld {
         }
       }
 
+      // 3b. 3D Volumetric Neo-Hookean FEM Tetrahedral Elements (Deviatoric Shear + Hydrostatic Volume Preservation!)
+      if (this.tetCount > 0) {
+        this.solveNeoHookeanTets(invH2, cfg);
+      }
+
       // 4. Botanical Posture / Stem Elasticity (springs fern fronds, reeds & anemone back to natural arch!)
       if (bendMult > 0.005) {
         const pc = this.postureCons;
@@ -849,21 +1131,37 @@ class XpbdWorld {
         }
       }
 
-      // 5b. Pneumatic Tire Rim-Barrel Keep-out (prevents tread collapse into the metallic wheel hub at ultra-low PSI!)
+      // 5b. Pneumatic & 3D FEM Tire Rim-Barrel Keep-out (prevents tread collapse into metallic hub at ultra-low PSI!)
       for (const ty of this.tyres) {
         const S = ty.sectors, P = ty.profile, base = ty.startIdx;
         const minR = ty.rimR + 0.045;
-        const hx = ty.hubX, hy = ty.hubY, hz = ty.hubZ;
+        const hx = ty.hubX, hy = ty.hubY;
         for (let si = 0; si < S; si++) {
           for (let pi = 1; pi < P - 1; pi++) {
-            const pid = base + si * P + pi;
-            const p3 = pid * 3;
+            const p3 = (base + si * P + pi) * 3;
             const dx = pos[p3] - hx, dy = pos[p3+1] - hy;
             const d = Math.hypot(dx, dy);
             if (d < minR && d > 1e-6) {
               const sc = minR / d;
-              pos[p3]   = hx + dx * sc;
-              pos[p3+1] = hy + dy * sc;
+              pos[p3] = hx + dx * sc; pos[p3+1] = hy + dy * sc;
+            }
+          }
+        }
+      }
+      for (const ft of this.femTyres) {
+        const S = ft.sectors, P = ft.profile, base = ft.startIdx;
+        const hx = ft.hubX, hy = ft.hubY;
+        for (let si = 0; si < S; si++) {
+          for (let pi = 1; pi < P - 1; pi++) {
+            for (let lay = 0; lay < 2; lay++) {
+              const minR = ft.rimR + (lay === 0 ? 0.03 : 0.11);
+              const p3 = (base + (si * P + pi) * 2 + lay) * 3;
+              const dx = pos[p3] - hx, dy = pos[p3+1] - hy;
+              const d = Math.hypot(dx, dy);
+              if (d < minR && d > 1e-6) {
+                const sc = minR / d;
+                pos[p3] = hx + dx * sc; pos[p3+1] = hy + dy * sc;
+              }
             }
           }
         }
@@ -878,6 +1176,20 @@ class XpbdWorld {
         vel[i3]   = (pos[i3]   - prev[i3])   * invH;
         vel[i3+1] = (pos[i3+1] - prev[i3+1]) * invH;
         vel[i3+2] = (pos[i3+2] - prev[i3+2]) * invH;
+      }
+    }
+
+    // Scatter per-tetrahedron 3D Neo-Hookean strain onto nodes for smooth scientific heatmap visualization!
+    if (this.tetCount > 0) {
+      this.nodeStrain.fill(0);
+      const idx = this.tetIdx, ts = this.tetStrain, ns = this.nodeStrain;
+      for (let t = 0; t < this.tetCount; t++) {
+        const st = ts[t] * 0.25;
+        const t4 = t * 4;
+        ns[idx[t4]]   += st;
+        ns[idx[t4+1]] += st;
+        ns[idx[t4+2]] += st;
+        ns[idx[t4+3]] += st;
       }
     }
   }
@@ -1382,6 +1694,174 @@ class DynamicMeshBuilder {
     this.addSphere(hx + 0.38, hy + 0.14, hz, 0.12, 0.22, 0.075, [0.82, 0.11, 0.11], [0.22, 0.02, 0.35], 8, 12);
   }
 
+  // Scientific Turbo/Viridis-inspired 3D FEM Strain Heatmap Color Ramp (blue -> cyan -> green -> amber -> red)
+  _strainColor(s) {
+    const t = Math.max(0, Math.min(1, s));
+    if (t < 0.25) {
+      const u = t * 4;
+      return [0.08 + u*0.04, 0.22 + u*0.52, 0.68 + u*0.24];
+    } else if (t < 0.55) {
+      const u = (t - 0.25) / 0.30;
+      return [0.12 + u*0.36, 0.74 + u*0.14, 0.92 - u*0.72];
+    } else if (t < 0.82) {
+      const u = (t - 0.55) / 0.27;
+      return [0.48 + u*0.50, 0.88 - u*0.26, 0.20 - u*0.14];
+    } else {
+      const u = (t - 0.82) / 0.18;
+      return [0.98, 0.62 - u*0.50, 0.06 + u*0.08];
+    }
+  }
+
+  // 3D Volumetric Neo-Hookean FEM Soft-Body Tire Mesh (Outer Surface + Grooved Tread + Inner Liner + Forged Alloy Rim!)
+  addFemTyreMesh(world, ft, showHeatmap) {
+    const S = ft.sectors, P = ft.profile, base = ft.startIdx;
+    const pos = world.pos, ns = world.nodeStrain;
+    const hx = ft.hubX, hy = ft.hubY, hz = ft.hubZ;
+    const nSurf = S * P;
+    const norms = new Float32Array(nSurf * 3);
+    const outerIdx = (si, pi) => base + (si * P + pi) * 2 + 1;
+
+    // 1. Smooth vertex normals across the outer skin of the 3D volumetric FEM mesh!
+    for (let si = 0; si < S; si++) {
+      const sNext = (si + 1) % S;
+      for (let pi = 0; pi < P - 1; pi++) {
+        const k00 = si*P+pi, k10 = sNext*P+pi, k11 = sNext*P+pi+1, k01 = si*P+pi+1;
+        const a3 = outerIdx(si, pi)*3, b3 = outerIdx(sNext, pi)*3;
+        const c3 = outerIdx(sNext, pi+1)*3, d3 = outerIdx(si, pi+1)*3;
+        const ux = pos[c3]-pos[a3], uy = pos[c3+1]-pos[a3+1], uz = pos[c3+2]-pos[a3+2];
+        const vx = pos[d3]-pos[b3], vy = pos[d3+1]-pos[b3+1], vz = pos[d3+2]-pos[b3+2];
+        let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+        const mx = 0.25*(pos[a3]+pos[b3]+pos[c3]+pos[d3]) - hx;
+        const my = 0.25*(pos[a3+1]+pos[b3+1]+pos[c3+1]+pos[d3+1]) - hy;
+        const mz = 0.25*(pos[a3+2]+pos[b3+2]+pos[c3+2]+pos[d3+2]) - hz;
+        const rl = Math.hypot(mx, my) || 1;
+        if (nx*(mx - (mx/rl)*ft.rimR) + ny*(my - (my/rl)*ft.rimR) + nz*mz < 0) { nx=-nx; ny=-ny; nz=-nz; }
+        for (const k of [k00, k10, k11, k01]) {
+          norms[k*3]+=nx; norms[k*3+1]+=ny; norms[k*3+2]+=nz;
+        }
+      }
+    }
+    for (let i = 0; i < nSurf; i++) {
+      const l = Math.hypot(norms[i*3], norms[i*3+1], norms[i*3+2]) || 1;
+      norms[i*3]/=l; norms[i*3+1]/=l; norms[i*3+2]/=l;
+    }
+
+    // 2. Outer rubber skin quads (realistic rubber or live 3D Neo-Hookean Strain Heatmap!)
+    this.ensure(S * (P - 1) * 6);
+    for (let si = 0; si < S; si++) {
+      const sNext = (si + 1) % S;
+      for (let pi = 0; pi < P - 1; pi++) {
+        const isTread = (pi === 2 || pi === 3);
+        const isShoulder = (pi === 1 || pi === 4);
+        const ids = [
+          [si, pi, si*P+pi], [sNext, pi, sNext*P+pi],
+          [sNext, pi+1, sNext*P+pi+1], [si, pi+1, si*P+pi+1]
+        ];
+        const emit = ([s, p, nk]) => {
+          const pid = outerIdx(s, p);
+          const p3 = pid * 3, n3 = nk * 3;
+          let col, rough, em = 0.0;
+          if (showHeatmap) {
+            col = this._strainColor(ns[pid] * 0.55);
+            rough = 0.38;
+            em = 0.15;
+          } else {
+            col = isTread ? [0.068, 0.072, 0.080] : (isShoulder ? [0.092, 0.098, 0.110] : [0.125, 0.132, 0.146]);
+            rough = isTread ? 0.80 : 0.50;
+          }
+          this.pushVert(pos[p3],pos[p3+1],pos[p3+2], norms[n3],norms[n3+1],norms[n3+2], col[0],col[1],col[2], rough, em, 0.04);
+        };
+        emit(ids[0]); emit(ids[1]); emit(ids[2]);
+        emit(ids[0]); emit(ids[2]); emit(ids[3]);
+      }
+    }
+
+    // 3. Flush sculpted performance tread ribs driven directly by the 3D FEM outer crown!
+    const lugH = 0.022;
+    for (let si = 0; si < S; si++) {
+      const sNext = (si + 1) % S;
+      for (let pi = 1; pi <= 4; pi++) {
+        const isCenter = (pi === 2 || pi === 3);
+        const qInfo = [
+          [outerIdx(si, pi), si*P+pi],
+          [outerIdx(sNext, pi), sNext*P+pi],
+          [outerIdx(sNext, pi+1), sNext*P+pi+1],
+          [outerIdx(si, pi+1), si*P+pi+1]
+        ];
+        const uIn = isCenter ? 0.88 : 0.74, vIn = isCenter ? 0.76 : 0.72;
+        let cx=0, cy=0, cz=0, avgSt=0;
+        for (const [pid] of qInfo) { cx+=pos[pid*3]; cy+=pos[pid*3+1]; cz+=pos[pid*3+2]; avgSt+=ns[pid]; }
+        cx*=0.25; cy*=0.25; cz*=0.25; avgSt*=0.25;
+        const bPts=[], tPts=[], qNorms=[];
+        for (const [pid, nk] of qInfo) {
+          const p3=pid*3, n3=nk*3;
+          const bx = cx + (pos[p3]-cx)*uIn, by = cy + (pos[p3+1]-cy)*uIn, bz = cz + (pos[p3+2]-cz)*vIn;
+          const hl = isCenter ? lugH : lugH * 0.85;
+          bPts.push([bx,by,bz]);
+          tPts.push([bx+norms[n3]*hl, by+norms[n3+1]*hl, bz+norms[n3+2]*hl]);
+          qNorms.push([norms[n3], norms[n3+1], norms[n3+2]]);
+        }
+        const tc = showHeatmap ? this._strainColor(avgSt * 0.62) : (isCenter ? [0.108, 0.114, 0.126] : [0.095, 0.100, 0.112]);
+        const sc = showHeatmap ? [tc[0]*0.6, tc[1]*0.6, tc[2]*0.6] : [0.048, 0.052, 0.058];
+        this.ensure(6);
+        const emitT = (q) => this.pushVert(tPts[q][0],tPts[q][1],tPts[q][2], qNorms[q][0],qNorms[q][1],qNorms[q][2], tc[0],tc[1],tc[2], showHeatmap?0.35:0.74, showHeatmap?0.18:0, 0.04);
+        emitT(0); emitT(1); emitT(2); emitT(0); emitT(2); emitT(3);
+        for (let e = 0; e < 4; e++) {
+          const e2 = (e + 1) % 4;
+          this.pushTriFlat(...bPts[e], ...bPts[e2], ...tPts[e2], sc[0],sc[1],sc[2], 0.86, 0, 0.02);
+          this.pushTriFlat(...bPts[e], ...tPts[e2], ...tPts[e],  sc[0],sc[1],sc[2], 0.86, 0, 0.02);
+        }
+      }
+    }
+
+    // 4. Forged Alloy 5-Spoke Wheel Rim + Brushed Barrel + Drilled Rotor + Tucked Crimson Brake Caliper!
+    const rimSegs = 48;
+    const rimR = ft.rimR, innerR = rimR - 0.068, lipR = rimR + 0.032, bz = ft.beadZ + 0.015;
+    this.ensure(rimSegs * 30);
+    for (let i = 0; i < rimSegs; i++) {
+      const a0 = (i / rimSegs) * Math.PI * 2 + ft.spinAngle;
+      const a1 = ((i + 1) / rimSegs) * Math.PI * 2 + ft.spinAngle;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const b00 = [hx+c0*innerR, hy+s0*innerR, hz-bz], b10 = [hx+c1*innerR, hy+s1*innerR, hz-bz];
+      const b11 = [hx+c1*innerR, hy+s1*innerR, hz+bz], b01 = [hx+c0*innerR, hy+s0*innerR, hz+bz];
+      const pushBarrel = (p, nx, ny) => this.pushVert(p[0],p[1],p[2], nx,ny,0, 0.34,0.37,0.42, 0.24, 0.0, 0.88);
+      pushBarrel(b00,-c0,-s0); pushBarrel(b10,-c1,-s1); pushBarrel(b11,-c1,-s1);
+      pushBarrel(b00,-c0,-s0); pushBarrel(b11,-c1,-s1); pushBarrel(b01,-c0,-s0);
+      for (const sgn of [-1, 1]) {
+        const zf = hz + sgn * bz, zIn = hz + sgn * (bz - 0.035);
+        const q0 = [hx+c0*innerR, hy+s0*innerR, zIn], q1 = [hx+c1*innerR, hy+s1*innerR, zIn];
+        const q2 = [hx+c1*lipR,   hy+s1*lipR,   zf],  q3 = [hx+c0*lipR,   hy+s0*lipR,   zf];
+        const pushLip = (p, c, s) => this.pushVert(p[0],p[1],p[2], c*0.35, s*0.35, sgn*0.93, 0.80,0.84,0.90, 0.14, 0.0, 0.95);
+        pushLip(q0,c0,s0); pushLip(q1,c1,s1); pushLip(q2,c1,s1);
+        pushLip(q0,c0,s0); pushLip(q2,c1,s1); pushLip(q3,c0,s0);
+      }
+    }
+    for (let sp = 0; sp < 5; sp++) {
+      const a = (sp / 5) * Math.PI * 2 + ft.spinAngle;
+      const ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+      for (const sgn of [-1, 1]) {
+        const zFront = hz + sgn*(bz*0.76), zBack = hz + sgn*(bz*0.50);
+        const zHubF  = hz + sgn*(bz*0.56), zHubB = hz + sgn*(bz*0.34);
+        const w0 = 0.058, w1 = 0.044, r0 = 0.16, r1 = innerR + 0.015;
+        const f0=[hx+ca*r0-px*w0,hy+sa*r0-py*w0,zHubF], f1=[hx+ca*r0+px*w0,hy+sa*r0+py*w0,zHubF];
+        const f2=[hx+ca*r1+px*w1,hy+sa*r1+py*w1,zFront], f3=[hx+ca*r1-px*w1,hy+sa*r1-py*w1,zFront];
+        const k0=[hx+ca*r0-px*w0,hy+sa*r0-py*w0,zHubB], k1=[hx+ca*r0+px*w0,hy+sa*r0+py*w0,zHubB];
+        const k2=[hx+ca*r1+px*w1,hy+sa*r1+py*w1,zBack],  k3=[hx+ca*r1-px*w1,hy+sa*r1-py*w1,zBack];
+        this.pushTriFlat(...f0, ...f1, ...f2, 0.74,0.78,0.85, 0.16, 0.0, 0.94);
+        this.pushTriFlat(...f0, ...f2, ...f3, 0.74,0.78,0.85, 0.16, 0.0, 0.94);
+        this.pushTriFlat(...f1, ...k1, ...k2, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...f1, ...k2, ...f2, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...k0, ...f0, ...f3, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...k0, ...f3, ...k3, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+      }
+      this.addSphere(hx+ca*0.135, hy+sa*0.135, hz+bz*0.58, 0.026,0.026,0.026, [0.90,0.92,0.96], [0.10,0.0,0.96], 5, 8);
+      this.addSphere(hx+ca*0.135, hy+sa*0.135, hz-bz*0.58, 0.026,0.026,0.026, [0.90,0.92,0.96], [0.10,0.0,0.96], 5, 8);
+    }
+    this.addSphere(hx, hy, hz, 0.20, 0.20, bz*0.62, [0.22,0.24,0.28], [0.20,0.0,0.88], 10, 18);
+    this.addSphere(hx, hy, hz, 0.48, 0.48, 0.032,   [0.58,0.60,0.64], [0.22,0.0,0.90], 8, 24);
+    this.addSphere(hx+0.38, hy+0.14, hz, 0.12, 0.22, 0.075, [0.82,0.11,0.11], [0.22,0.02,0.35], 8, 12);
+  }
+
   buildFromWorld(world, timeSec, showCollider) {
     this.clear();
     // Static hardware / reef rocks / posts
@@ -1403,8 +1883,9 @@ class DynamicMeshBuilder {
     }
     // 5. Woven cloth meshes
     for (const cg of world.clothGrids) this.addClothGrid(world, cg);
-    // 5b. Pneumatic XPBD Tires (deformable carcass + raised 3D tread lugs + forged alloy rim)
+    // 5b. Pneumatic XPBD Tires + 3D Volumetric Neo-Hookean FEM Soft-Body Tires
     for (const ty of world.tyres) this.addTyreMesh(world, ty);
+    for (const ft of world.femTyres) this.addFemTyreMesh(world, ft, cfg.femHeatmap);
     // 6. Interactive 3D Collider Sphere
     if (showCollider && world.collider.enabled) {
       const c = world.collider;
@@ -1659,7 +2140,118 @@ function addPneumaticTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.14, halfW =
   });
 }
 
+function addFemSoftBodyTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.15, halfW = 0.43, sectors = 36) {
+  // 3D Volumetric Solid Rubber Wall: inner cavity liner (lay=0) + outer tread/sidewall skin (lay=1)
+  // 7 profile stations: inner bead (0) -> inner sidewall (1) -> inner shoulder (2) -> crown (3) -> outer shoulder (4) -> outer sidewall (5) -> outer bead (6)
+  const wallThick = 0.11;
+  const outerPts = [
+    [rimR + 0.01,               -halfW * 0.78], // 0: outer-face inner bead
+    [rimR + (outerR-rimR)*0.52, -halfW * 1.02], // 1: inner sidewall bulge
+    [outerR - 0.015,            -halfW * 0.76], // 2: inner tread shoulder
+    [outerR,                     0.0         ], // 3: center crown
+    [outerR - 0.015,             halfW * 0.76], // 4: outer tread shoulder
+    [rimR + (outerR-rimR)*0.52,  halfW * 1.02], // 5: outer sidewall bulge
+    [rimR + 0.01,                halfW * 0.78], // 6: outer-face outer bead
+  ];
+  const innerPts = [
+    [rimR + 0.01,               -halfW * 0.60], // 0: inner-liner bead
+    [rimR + (outerR-rimR)*0.48, -halfW * 0.78], // 1: inner cavity sidewall
+    [outerR - wallThick - 0.01, -halfW * 0.58], // 2: inner cavity shoulder
+    [outerR - wallThick,         0.0         ], // 3: inner cavity crown
+    [outerR - wallThick - 0.01,  halfW * 0.58], // 4: inner cavity shoulder
+    [rimR + (outerR-rimR)*0.48,  halfW * 0.78], // 5: inner cavity sidewall
+    [rimR + 0.01,                halfW * 0.60], // 6: inner-liner bead
+  ];
+  const P = outerPts.length;
+  const startIdx = world.n;
+
+  for (let si = 0; si < sectors; si++) {
+    const a = (si / sectors) * Math.PI * 2;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    for (let pi = 0; pi < P; pi++) {
+      const isBead = (pi === 0 || pi === P - 1);
+      const isTread = (pi >= 2 && pi <= 4);
+      for (let lay = 0; lay < 2; lay++) {
+        const [r, zOff] = (lay === 0) ? innerPts[pi] : outerPts[pi];
+        const invM = isBead ? 0.0 : (isTread ? 0.85 : 1.0);
+        world.addParticle(hx + ca * r, hy + sa * r, hz + zOff, invM, 0.025, 0.03);
+      }
+    }
+  }
+
+  // Conformal 5-Tetrahedron Decomposition of every 3D Hexahedral Rubber Wall Cell (alternating parity so all shared faces match!)
+  const nodeId = (si, pi, lay) => startIdx + ((si % sectors) * P + pi) * 2 + lay;
+  for (let si = 0; si < sectors; si++) {
+    const sNext = (si + 1) % sectors;
+    for (let pi = 0; pi < P - 1; pi++) {
+      // 8 corners of hexahedral rubber cell (s in {si, sNext}, p in {pi, pi+1}, l in {0, 1})
+      const v000 = nodeId(si,    pi,   0);
+      const v100 = nodeId(sNext, pi,   0);
+      const v110 = nodeId(sNext, pi+1, 0);
+      const v010 = nodeId(si,    pi+1, 0);
+      const v001 = nodeId(si,    pi,   1);
+      const v101 = nodeId(sNext, pi,   1);
+      const v111 = nodeId(sNext, pi+1, 1);
+      const v011 = nodeId(si,    pi+1, 1);
+
+      if (((si + pi) & 1) === 0) {
+        world.addTet(v000, v100, v110, v101);
+        world.addTet(v000, v110, v010, v011);
+        world.addTet(v000, v001, v101, v011);
+        world.addTet(v111, v101, v011, v110);
+        world.addTet(v000, v110, v101, v011); // central octahedron core tet
+      } else {
+        world.addTet(v100, v110, v010, v111);
+        world.addTet(v100, v010, v000, v001);
+        world.addTet(v100, v101, v111, v001);
+        world.addTet(v011, v111, v001, v010);
+        world.addTet(v100, v010, v111, v001); // central core tet (mirrored parity!)
+      }
+    }
+  }
+
+  // Compute rest enclosed cavity volume (lay=0) for Boyle's-law air pressure
+  let restVol = 0.0;
+  for (let si = 0; si < sectors; si++) {
+    const sNext = (si + 1) % sectors;
+    for (let pi = 0; pi < P - 1; pi++) {
+      const a = nodeId(si, pi, 0)*3, b = nodeId(sNext, pi, 0)*3;
+      const c = nodeId(sNext, pi+1, 0)*3, d = nodeId(si, pi+1, 0)*3;
+      const ux = world._pos[c]-world._pos[a], uy = world._pos[c+1]-world._pos[a+1], uz = world._pos[c+2]-world._pos[a+2];
+      const vx = world._pos[d]-world._pos[b], vy = world._pos[d+1]-world._pos[b+1], vz = world._pos[d+2]-world._pos[b+2];
+      let nx = 0.5*(uy*vz - uz*vy), ny = 0.5*(uz*vx - ux*vz), nz = 0.5*(ux*vy - uy*vx);
+      const mx = 0.25*(world._pos[a]+world._pos[b]+world._pos[c]+world._pos[d]) - hx;
+      const my = 0.25*(world._pos[a+1]+world._pos[b+1]+world._pos[c+1]+world._pos[d+1]) - hy;
+      const mz = 0.25*(world._pos[a+2]+world._pos[b+2]+world._pos[c+2]+world._pos[d+2]) - hz;
+      const rl = Math.hypot(mx, my) || 1;
+      if (nx*(mx - (mx/rl)*rimR) + ny*(my - (my/rl)*rimR) + nz*mz < 0) { nx=-nx; ny=-ny; nz=-nz; }
+      restVol += (mx*nx + my*ny + mz*nz) * (1.0 / 3.0);
+    }
+  }
+
+  world.femTyres.push({
+    startIdx, sectors, profile: P, innerPts, outerPts,
+    hubX: hx, hubY: hy, hubZ: hz, hubVy: 0.0, spinAngle: 0.0,
+    rimR, outerR, beadZ: halfW * 0.78,
+    restVol: Math.max(0.25, Math.abs(restVol))
+  });
+}
+
 const SCENES = [
+  {
+    id: "fem_tyre",
+    name: "3D FEM Soft-Body Tire",
+    tag: "Neo-Hookean",
+    desc: "1,080 3D volumetric Neo-Hookean tetrahedra (Young's E, Poisson's \u03BD, volume preservation & strain heatmap)!",
+    defaults: { substeps: 6, gravity: -9.8, wind: 0.0, turb: 0.0, stretch: 1600, bend: 0.55, damping: 0.985, tearRatio: 0.0, tyrePsi: 30, tyreLoad: 1.35, tyreSpin: 3.0, femYoung: 2.4, femPoisson: 0.44, femHeatmap: false },
+    camera: { yaw: -0.52, pitch: 0.16, dist: 4.35, target: [0, -0.58, 0] },
+    build(w) {
+      w.groundY = -1.78;
+      w.collider.pos = [1.55, -1.62, 0.0];
+      w.collider.radius = 0.42;
+      addFemSoftBodyTyre(w, 0.0, -0.62, 0.0, 0.66, 1.15, 0.43, 36);
+    }
+  },
   {
     id: "tyre",
     name: "Pneumatic Tire XPBD",
@@ -1936,9 +2528,12 @@ const cfg = {
   tearRatio: 0.0,
   wind: 0.0,
   turb: 0.0,
-  tyrePsi: 32,
-  tyreLoad: 1.15,
-  tyreSpin: 3.5,
+  tyrePsi: 30,
+  tyreLoad: 1.35,
+  tyreSpin: 3.0,
+  femYoung: 2.4,
+  femPoisson: 0.44,
+  femHeatmap: false,
   showMesh: true,
   showParticles: false,
   showConstraints: false,
@@ -1978,6 +2573,10 @@ function syncSlidersFromCfg() {
   bind("sTyrePsi", "vTyrePsi", cfg.tyrePsi, v => `${Math.round(v)} PSI`);
   bind("sTyreLoad", "vTyreLoad", cfg.tyreLoad, v => `${Number(v).toFixed(2)}x`);
   bind("sTyreSpin", "vTyreSpin", cfg.tyreSpin, v => `${Number(v).toFixed(1)}`);
+  bind("sFemYoung", "vFemYoung", cfg.femYoung, v => `${Number(v).toFixed(1)} MPa`);
+  bind("sFemPoisson", "vFemPoisson", cfg.femPoisson, v => `${Number(v).toFixed(2)}`);
+  const hm = document.getElementById("cFemHeatmap");
+  if (hm) hm.checked = !!cfg.femHeatmap;
 }
 
 function loadScene(sc) {
@@ -1993,8 +2592,11 @@ function loadScene(sc) {
   simTime = 0.0;
   windPulse = 0.0;
   const tp = document.getElementById("tyrePanel");
-  if (tp) tp.style.display = (world.tyres.length > 0) ? "flex" : "none";
-  document.getElementById("hudTitle").textContent = sc.name + " · XPBD Particle-Driven Mesh";
+  const hasAnyTyre = (world.tyres.length > 0 || world.femTyres.length > 0);
+  if (tp) tp.style.display = hasAnyTyre ? "flex" : "none";
+  const fc = document.getElementById("femControls");
+  if (fc) fc.style.display = (world.femTyres.length > 0) ? "flex" : "none";
+  document.getElementById("hudTitle").textContent = sc.name + (world.tetCount > 0 ? " · 3D Volumetric Neo-Hookean FEM" : " · XPBD Particle-Driven Mesh");
   document.querySelectorAll(".scene-btn").forEach(b => b.classList.toggle("active", b.dataset.id === sc.id));
 }
 
@@ -2017,17 +2619,22 @@ hookRange("sTurb", "vTurb", "turb", Number, v => v.toFixed(1));
 hookRange("sTyrePsi", "vTyrePsi", "tyrePsi", Number, v => `${Math.round(v)} PSI`);
 hookRange("sTyreLoad", "vTyreLoad", "tyreLoad", Number, v => `${v.toFixed(2)}x`);
 hookRange("sTyreSpin", "vTyreSpin", "tyreSpin", Number, v => `${v.toFixed(1)}`);
+hookRange("sFemYoung", "vFemYoung", "femYoung", Number, v => `${v.toFixed(1)} MPa`);
+hookRange("sFemPoisson", "vFemPoisson", "femPoisson", Number, v => `${v.toFixed(2)}`);
+document.getElementById("cFemHeatmap").onchange = e => cfg.femHeatmap = e.target.checked;
 
 let curbAnim = 0.0;
 document.getElementById("btnTyreDrop").onclick = () => {
-  for (const ty of world.tyres) {
+  const liftTire = (t, count) => {
     const dy = 1.25;
-    ty.hubY += dy; ty.hubVy = 0.0;
-    const end = ty.startIdx + ty.sectors * ty.profile;
-    for (let i = ty.startIdx; i < end; i++) {
+    t.hubY += dy; t.hubVy = 0.0;
+    const end = t.startIdx + count;
+    for (let i = t.startIdx; i < end; i++) {
       world.pos[i*3+1] += dy; world.prev[i*3+1] += dy; world.vel[i*3+1] = 0.0;
     }
-  }
+  };
+  for (const ty of world.tyres)    liftTire(ty, ty.sectors * ty.profile);
+  for (const ft of world.femTyres) liftTire(ft, ft.sectors * ft.profile * 2);
 };
 document.getElementById("btnTyreCurb").onclick = () => {
   cfg.showCollider = true;
@@ -2226,7 +2833,7 @@ function frame(now) {
   // Step XPBD particle solver
   simTime += dt;
   windPulse *= Math.exp(-dt * 2.2);
-  if (curbAnim > 0.0 && world.tyres.length > 0) {
+  if (curbAnim > 0.0 && (world.tyres.length > 0 || world.femTyres.length > 0)) {
     curbAnim = Math.max(0.0, curbAnim - dt * 0.28);
     const u = 1.0 - curbAnim; // 0 -> 1 sweep across bottom of tire
     world.collider.pos[0] = 1.75 - u * 3.5;
@@ -2301,10 +2908,11 @@ function frame(now) {
     meshBuilder.clear();
   }
 
-  // 4. Debug Overlay: XPBD Constraints color-coded by live tension!
+  // 4. Debug Overlay: XPBD Constraints + 3D FEM Tetrahedra color-coded by live strain!
   if (cfg.showConstraints) {
     const dc = world.distCons;
-    ensureLineScratch(dc.length * 2);
+    const tetLines = world.tetCount * 6;
+    ensureLineScratch((dc.length + tetLines) * 2);
     let o = 0;
     for (let i = 0; i < dc.length; i++) {
       const c = dc[i];
@@ -2317,6 +2925,22 @@ function frame(now) {
       lineScratch[o++]=r; lineScratch[o++]=g; lineScratch[o++]=b; lineScratch[o++]=al;
       lineScratch[o++]=world.pos[b3]; lineScratch[o++]=world.pos[b3+1]; lineScratch[o++]=world.pos[b3+2];
       lineScratch[o++]=r; lineScratch[o++]=g; lineScratch[o++]=b; lineScratch[o++]=al;
+    }
+    if (world.tetCount > 0) {
+      const ti = world.tetIdx, ts = world.tetStrain;
+      const edges = [[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+      for (let t = 0; t < world.tetCount; t++) {
+        const s = Math.min(1.0, ts[t] * 1.15);
+        const r = 0.15 + s * 0.85, g = 0.88 - s * 0.68, b = 0.72 * (1 - s);
+        const t4 = t * 4;
+        for (let e = 0; e < 6; e++) {
+          const a3 = ti[t4 + edges[e][0]] * 3, b3 = ti[t4 + edges[e][1]] * 3;
+          lineScratch[o++]=world.pos[a3]; lineScratch[o++]=world.pos[a3+1]; lineScratch[o++]=world.pos[a3+2];
+          lineScratch[o++]=r; lineScratch[o++]=g; lineScratch[o++]=b; lineScratch[o++]=0.68;
+          lineScratch[o++]=world.pos[b3]; lineScratch[o++]=world.pos[b3+1]; lineScratch[o++]=world.pos[b3+2];
+          lineScratch[o++]=r; lineScratch[o++]=g; lineScratch[o++]=b; lineScratch[o++]=0.68;
+        }
+      }
     }
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -2358,7 +2982,7 @@ function frame(now) {
 
   // Update HUD stats
   document.getElementById("hPts").textContent = world.n;
-  document.getElementById("hCons").textContent = world.distCons.length + world.bendCons.length;
+  document.getElementById("hCons").textContent = world.tetCount > 0 ? `${world.tetCount} FEM Tets` : (world.distCons.length + world.bendCons.length);
   document.getElementById("hTris").textContent = Math.floor(meshBuilder.vCount / 3);
   document.getElementById("hTorn").textContent = world.tornCount;
 }
