@@ -681,6 +681,15 @@ frontier_compile_fluid_slang_shader(FluidVolumeRaymarch.slang             Fullsc
 frontier_compile_fluid_slang_shader(FluidVolumeRaymarch.slang             FragmentEntry          fragment FluidVolumeRaymarch.frag.spv)
 frontier_compile_fluid_slang_shader(SimulationPostOverlay.slang           FullscreenVertexEntry  vertex   SimulationPostOverlay.vert.spv)
 frontier_compile_fluid_slang_shader(SimulationPostOverlay.slang           FragmentEntry          fragment SimulationPostOverlay.frag.spv)
+frontier_compile_fluid_slang_shader(FluidTracerDebrisCompute.slang        TracerUpdateComputeEntry compute FluidTracerUpdateCompute.comp.spv)
+frontier_compile_fluid_slang_shader(FluidTracerDebrisCompute.slang        DebrisUpdateComputeEntry compute FluidDebrisUpdateCompute.comp.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       VelocityVectorVertexEntry  vertex   FluidVelocityVector.vert.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       ScalarSliceVertexEntry     vertex   FluidScalarSlice.vert.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       ScalarSliceFragmentEntry   fragment FluidScalarSlice.frag.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       TracerRenderVertexEntry    vertex   FluidTracerRender.vert.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       DebrisRenderVertexEntry    vertex   FluidDebrisRender.vert.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       GizmoLineVertexEntry       vertex   FluidGizmoLine.vert.spv)
+frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       OverlayColourFragmentEntry fragment FluidOverlayColour.frag.spv)
 
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
@@ -1071,6 +1080,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/ForceFields/ForceFieldGpuUploader.cpp
     Engine/SimulationSpace/EffectLayers/EffectLayerSpecification.cpp
     Engine/SimulationSpace/EffectLayers/EffectLayerStack.cpp
+    Engine/SimulationSpace/EffectLayers/SimulationCheckpointRing.cpp
     Engine/ParticleSpace/FireworkPatternSampler.cpp
     Engine/ParticleSpace/ParticleTemplateRegistry.cpp
     Engine/ParticleSpace/CarrierSolidRegistry.cpp
@@ -1080,6 +1090,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/Fluid/FluidGpuSolver.cpp
     Engine/SimulationSpace/Fluid/FluidVolumeRenderer.cpp
     Engine/SimulationSpace/Fluid/FluidSimulationPostOverlay.cpp
+    Engine/SimulationSpace/Fluid/FluidPresetRegistry.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1381,6 +1392,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(ForceFieldValidation                      Exhibits/ForceFieldValidation.cpp)
     target_compile_definitions(ForceFieldValidation PRIVATE FRONTIER_FORCEFIELD_WITH_LIVE_JOLT=1)
     frontier_register_exhibit(ParticleGpuPhysicsValidation              Exhibits/ParticleGpuPhysicsValidation.cpp)
+    frontier_register_exhibit(FluidSolverValidation                     Exhibits/FluidSolverValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)
