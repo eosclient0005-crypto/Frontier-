@@ -1133,6 +1133,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/Deformable/DeformableThreadExchange.cpp
     Engine/SimulationSpace/Deformable/DeformableVulkanExecutor.cpp
     Engine/SimulationSpace/Deformable/DeformableWorldRegistry.cpp
+    Engine/SimulationSpace/Deformable/VehicleDeformableCoupling.cpp
+    Engine/SimulationSpace/Deformable/DeformableExtension.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1440,6 +1442,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(VertexMotionAtlasValidation               Exhibits/VertexMotionAtlasValidation.cpp)
     frontier_register_exhibit(DeformableIntegrationValidation           Exhibits/DeformableIntegrationValidation.cpp)
     frontier_register_exhibit(DeformableWorldValidation                 Exhibits/DeformableWorldValidation.cpp)
+    frontier_register_exhibit(DeformableRuntimeExtensionValidation      Exhibits/DeformableRuntimeExtensionValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)
