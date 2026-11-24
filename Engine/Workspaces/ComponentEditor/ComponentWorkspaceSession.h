@@ -17,6 +17,7 @@
 #include "Engine/GeometricRaster/ComponentEditor/ComponentViewportRenderer.h"
 #include "Engine/SimulationSpace/PhysicsSpace/PhysicsExtension.h"
 #include "Engine/SimulationSpace/PhysicsSpace/VehicleDynamicsSolver.h"
+#include "Engine/SimulationSpace/ComponentSimulationPreviewDriver.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -144,6 +145,7 @@ public:
     float                                                                BrakeInput        = 0.0f;
     float                                                                SteerInput        = 0.0f;
     SimulationSpace::PhysicsSpace::VehicleSimulationTelemetry            VehicleTelemetry  {};
+    SimulationSpace::ComponentSimulationPreviewDriver                    SimulationPreview {};
     std::unordered_map<uint32_t, float>                                  SpringVelocities  {};
     std::unordered_map<uint32_t, float>                                  KickImpulses      {};
 
