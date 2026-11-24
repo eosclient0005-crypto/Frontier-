@@ -1186,6 +1186,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/SimulationCheckpointBuffer.cpp
     Engine/SimulationSpace/SimulationBudgetGovernor.cpp
     Engine/SimulationSpace/SimulationTelemetryProfiler.cpp
+    Engine/SimulationSpace/SimulationInteractionBridge.cpp
+    Engine/SimulationSpace/SimulationTriggerRouter.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1503,6 +1505,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(SimulationGpuRenderFeedValidation         Exhibits/SimulationGpuRenderFeedValidation.cpp)
     frontier_register_exhibit(SimulationPhaseHValidation                Exhibits/SimulationPhaseHValidation.cpp)
     frontier_register_exhibit(SimulationPhaseIValidation                Exhibits/SimulationPhaseIValidation.cpp)
+    frontier_register_exhibit(SimulationPhaseJValidation                Exhibits/SimulationPhaseJValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)

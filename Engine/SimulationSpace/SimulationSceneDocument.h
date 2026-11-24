@@ -137,6 +137,10 @@ public:
         const SimulationSceneDocument& doc,
         SimulationCoordinatorExtension& coordinator,
         std::string* outError = nullptr);
+
+    /// Enumerates all shipped .VolumetricSpace scene files in `scenesDirectory` in deterministic sorted order.
+    [[nodiscard]] static std::vector<std::filesystem::path> EnumerateShippedScenes(
+        const std::filesystem::path& scenesDirectory = "EngineContent/Simulation/Scenes");
 };
 
 } // namespace Frontier::SimulationSpace

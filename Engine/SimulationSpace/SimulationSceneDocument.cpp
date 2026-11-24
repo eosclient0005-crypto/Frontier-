@@ -460,4 +460,24 @@ bool SimulationSceneCodec::MountIntoCoordinator(
     return true;
 }
 
+std::vector<std::filesystem::path> SimulationSceneCodec::EnumerateShippedScenes(
+    const std::filesystem::path& scenesDirectory)
+{
+    std::vector<std::filesystem::path> result;
+    std::error_code ec;
+    if (!std::filesystem::exists(scenesDirectory, ec) || !std::filesystem::is_directory(scenesDirectory, ec))
+    {
+        return result;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(scenesDirectory, ec))
+    {
+        if (entry.is_regular_file(ec) && entry.path().extension() == ".VolumetricSpace")
+        {
+            result.push_back(entry.path());
+        }
+    }
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
 } // namespace Frontier::SimulationSpace
