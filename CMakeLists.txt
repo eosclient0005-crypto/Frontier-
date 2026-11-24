@@ -643,6 +643,13 @@ frontier_compile_particlespace_slang_shader(ParticleSpatialHashCompute.slang    
 frontier_compile_particlespace_slang_shader(ParticleSpatialHashCompute.slang        PrefixSumAddBlocksComputeEntry    compute  ParticleSpatialHashScanAdd.comp.spv)
 frontier_compile_particlespace_slang_shader(ParticleSpatialHashCompute.slang        ScatterIndicesComputeEntry        compute  ParticleSpatialHashScatter.comp.spv)
 frontier_compile_particlespace_slang_shader(ParticleSpatialHashCompute.slang        ResolveNeighborsComputeEntry      compute  ParticleSpatialHashResolve.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               PredictInertiaComputeEntry        compute  ParticleXpbdPredictInertia.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               ResetDualsComputeEntry            compute  ParticleXpbdResetDuals.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               SolveDistanceBatchComputeEntry    compute  ParticleXpbdSolveDistance.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               SolveSeamBatchComputeEntry        compute  ParticleXpbdSolveSeam.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               SolveFaceBatchComputeEntry        compute  ParticleXpbdSolveFace.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               SolveHingeBatchComputeEntry       compute  ParticleXpbdSolveHinge.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleXpbdCompute.slang               FinalizeSubstepComputeEntry       compute  ParticleXpbdFinalizeSubstep.comp.spv)
 
 function(frontier_compile_fluid_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Fluid/${SLANG_REL_PATH}")
@@ -1095,6 +1102,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ParticleSpace/ParticleGpuSimulation.cpp
     Engine/ParticleSpace/ParticleGpuRenderer.cpp
     Engine/ParticleSpace/ParticleSpatialHash.cpp
+    Engine/ParticleSpace/ParticleXpbdNetworkBuilder.cpp
     Engine/SimulationSpace/Fluid/SparseTileBank.cpp
     Engine/SimulationSpace/Fluid/FluidGpuSolver.cpp
     Engine/SimulationSpace/Fluid/FluidVolumeRenderer.cpp
