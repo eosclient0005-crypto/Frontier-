@@ -61,11 +61,21 @@ public:
     [[nodiscard]] bool Resume() noexcept;
     void               Stop() noexcept;
 
+    /// Edit-mode / runtime fast-skip toggle (when false, Tick() returns immediately in 0.00 ms).
+    void               SetShouldUpdate(bool shouldUpdate) noexcept;
+    [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
+
+#if FRONTIER_FLUID_HAS_VULKAN
+    /// Attaches a live Vulkan 1.2 interchange for Deformable, Fluid, and Particle async GPU execution.
+    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+#endif
+
     [[nodiscard]] PreviewRunStatus QueryStatus() const noexcept { return RunStatus_; }
     [[nodiscard]] bool             QueryPlaying() const noexcept { return RunStatus_ == PreviewRunStatus::Running; }
     [[nodiscard]] const PrefabAssemblyReport&    InspectAssemblyReport() const noexcept { return AssemblyReport_; }
     [[nodiscard]] const SimulationSceneDocument& InspectActiveScene() const noexcept { return ActiveScene_; }
     [[nodiscard]] SimulationCoordinatorTelemetry InspectTelemetry() const noexcept;
+    [[nodiscard]] SimulationExecutionRouteSummary InspectExecutionRoutes() const noexcept;
 
     /// Extracts current deformed world-space triangle surfaces for all active SoftBody instances.
     [[nodiscard]] std::vector<PreviewSurfaceSnapshot> ExtractDeformableRenderSurfaces() const;
@@ -79,6 +89,10 @@ private:
     [[nodiscard]] bool MountPreparedScene(const SimulationSceneDocument& sceneDoc, std::string* outError);
 
     PreviewRunStatus                                RunStatus_      = PreviewRunStatus::Idle;
+    bool                                            ShouldUpdate_   = true;
+#if FRONTIER_FLUID_HAS_VULKAN
+    GeometricRaster::VulkanInterchange*             Interchange_    = nullptr;
+#endif
     PrefabAssemblyReport                            AssemblyReport_ {};
     SimulationSceneDocument                         ActiveScene_    {};
     std::unique_ptr<SimulationCoordinatorExtension> Coordinator_    {};

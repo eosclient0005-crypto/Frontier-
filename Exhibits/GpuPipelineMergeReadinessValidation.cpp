@@ -15,9 +15,11 @@
 #include "Engine/SimulationSpace/AsyncGpuReadbackRing.h"
 #include "Engine/SimulationSpace/Deformable/DeformablePresetRegistry.h"
 #include "Engine/SimulationSpace/Deformable/DeformableVulkanExecutor.h"
+#include "Engine/SimulationSpace/Deformable/DeformableWorldRegistry.h"
 #include "Engine/SimulationSpace/DualLoopSimulationPools.h"
 #include "Engine/SimulationSpace/SimulationCoordinatorExtension.h"
 #include "Engine/SimulationSpace/SimulationSceneDocument.h"
+#include "Engine/SimulationSpace/WorldSimulationSession.h"
 
 #include <atomic>
 #include <cstdlib>
@@ -291,6 +293,57 @@ int main()
               "U04: FRONTIER_PROFILE=Shipping compiles & runs SimulationDomainInstanceHandle with ZERO Editor symbols");
     }
 #endif
+
+    // ---------------------------------------------------------------------------------------------------------
+    // 8. U06 End-to-End Runtime Chain: DeformableWorldRegistry + WorldSimulationSession + Route Summary
+    // ---------------------------------------------------------------------------------------------------------
+    DeformableWorldRegistry worldReg {};
+    const uint32_t worldClothId = worldReg.SpawnPreset(DeformablePresetKind::WovenCloth, { 0.0f, 1.0f, 0.0f }, "Banner");
+    const auto* clothInst = worldReg.Find(worldClothId);
+    Check(clothInst != nullptr && clothInst->GpuExecutor != nullptr && clothInst->GpuExecutor->Ready(),
+          "U06: DeformableWorldRegistry pre-initializes per-instance DeformableVulkanExecutor on spawn");
+
+    (void)worldReg.StepWorld(1.0f / 60.0f, 0.016f, { 0.0f, 1.5f, 4.0f }, 0.25f, nullptr);
+    gAllocCount.store(0ull);
+    gCountAllocs.store(true);
+    const auto worldSum = worldReg.StepWorld(1.0f / 60.0f, 0.032f, { 0.0f, 1.5f, 4.0f }, 0.25f, nullptr);
+    gCountAllocs.store(false);
+    Check(worldSum.FullRateCount == 1u && worldSum.GpuDispatchedCount == 0u && gAllocCount.load() == 0ull,
+          "U06: DeformableWorldRegistry::StepWorld runs ExecuteTickInPlace with 0 heap allocations & honest route");
+
+    WorldSimulationSession worldSession {};
+    std::string sessionErr;
+    Check(worldSession.BeginPlayFromSceneFile("EngineContent/Simulation/Scenes/TracksideCoupledShowcase.VolumetricSpace", &sessionErr),
+          "U06: WorldSimulationSession launches live 5-domain showcase scene");
+
+    worldSession.Tick(1.0 / 60.0);
+    worldSession.Tick(1.0 / 60.0);
+
+    const auto routes = worldSession.InspectExecutionRoutes();
+    Check(routes.DeformableRoute == DeformableExecutionRoute::HeadlessCpuMirror &&
+          routes.FluidRoute == FluidExecutionRoute::HeadlessCpuMirror &&
+          routes.ParticleRoute == ParticleExecutionRoute::HeadlessCpuMirror &&
+          !routes.AnyRealGpuDispatched && !routes.AllRealGpuDispatched,
+          "U06: WorldSimulationSession::InspectExecutionRoutes reports honest HeadlessCpuMirror across all 3 backends");
+
+    const uint64_t worldTicksBeforeSkip = worldSession.InspectTelemetry().CompletedTicks;
+    worldSession.SetShouldUpdate(false);
+    worldSession.Tick(1.0 / 60.0);
+    worldSession.Tick(1.0 / 60.0);
+    Check(worldSession.InspectTelemetry().CompletedTicks == worldTicksBeforeSkip,
+          "U06: WorldSimulationSession::SetShouldUpdate(false) achieves 0.00 ms fast-skip");
+    worldSession.SetShouldUpdate(true);
+
+    gAllocCount.store(0ull);
+    gCountAllocs.store(true);
+    for (uint32_t t = 0u; t < 5u; ++t)
+    {
+        worldSession.Tick(1.0 / 60.0);
+    }
+    gCountAllocs.store(false);
+    Check(gAllocCount.load() == 0ull,
+          "U06: WorldSimulationSession::Tick executes 5 full 5-domain ticks with 0 heap allocations");
+    worldSession.Stop();
 
     std::cout << "GpuPipelineMergeReadinessValidation ("
 #if FRONTIER_PROFILE_EDITOR

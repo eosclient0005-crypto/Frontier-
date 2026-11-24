@@ -260,12 +260,29 @@ std::array<float, 3> SimulationCoordinatorExtension::SampleFluidVelocityThunk(
     return static_cast<const SimulationCoordinatorExtension*>(userContext)->SampleFluidVelocityWorld(worldPosition);
 }
 
+SimulationExecutionRouteSummary SimulationCoordinatorExtension::InspectExecutionRoutes() const noexcept
+{
+    SimulationExecutionRouteSummary summary {};
+    summary.DeformableRoute = Deformables_.InspectVulkanExecutor().InspectTelemetry().Route;
+    summary.FluidRoute      = FluidGpuExecutor_.InspectTelemetry().Route;
+    summary.ParticleRoute   = ParticleGpuExecutor_.InspectTelemetry().Route;
+
+    const bool defGpu  = Deformables_.InspectVulkanExecutor().InspectTelemetry().RealGpuDispatched ||
+                         (Deformables_.InspectTelemetry().LastWorldSummary.GpuDispatchedCount > 0u);
+    const bool fldGpu  = FluidGpuExecutor_.InspectTelemetry().RealGpuDispatched;
+    const bool prtGpu  = ParticleGpuExecutor_.InspectTelemetry().RealGpuDispatched;
+    summary.AnyRealGpuDispatched = defGpu || fldGpu || prtGpu;
+    summary.AllRealGpuDispatched = defGpu && fldGpu && prtGpu;
+    return summary;
+}
+
 #if FRONTIER_FLUID_HAS_VULKAN
 bool SimulationCoordinatorExtension::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
 {
+    const bool defOk      = Deformables_.AttachVulkanInterchange(interchange);
     const bool fluidOk    = FluidGpuExecutor_.AttachVulkanInterchange(interchange);
     const bool particleOk = ParticleGpuExecutor_.AttachVulkanInterchange(interchange);
-    return fluidOk && particleOk;
+    return defOk && fluidOk && particleOk;
 }
 #endif
 

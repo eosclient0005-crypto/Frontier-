@@ -78,6 +78,12 @@ public:
 
     [[nodiscard]] bool QueryInitialized() const noexcept { return Initialized_; }
     [[nodiscard]] bool QuerySuspended() const noexcept { return Suspended_; }
+    void               SetShouldUpdate(bool shouldUpdate) noexcept { ShouldUpdate_ = shouldUpdate; }
+    [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
+
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+#endif
 
     // Camera, external ForceField/Jolt coupling, and live vehicle chassis state setters
     void AssignCameraWorldPosition(const std::array<float, 3>& cameraPositionMeters) noexcept;
@@ -113,6 +119,7 @@ private:
     DeformableExtensionTelemetry                Telemetry_        {};
     bool                                        Initialized_      = false;
     bool                                        Suspended_        = false;
+    bool                                        ShouldUpdate_     = true;
 };
 
 static_assert(Lifecycle::SuspendableParticipant<DeformableExtension>,

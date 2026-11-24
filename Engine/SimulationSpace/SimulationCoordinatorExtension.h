@@ -69,6 +69,15 @@ struct SimulationCoordinatorTelemetry
 
 /// Deterministic Frontier engine runtime coordinator coupling ForceFields, 3D Eulerian Fluid,
 /// GPU ParticleSpace, Multi-Instance Deformables, 4-Wheel Vehicle Tires, and Jolt RigidColliderProxy feedback.
+struct SimulationExecutionRouteSummary
+{
+    Deformable::DeformableExecutionRoute DeformableRoute      = Deformable::DeformableExecutionRoute::HeadlessCpuMirror;
+    Fluid::FluidExecutionRoute           FluidRoute           = Fluid::FluidExecutionRoute::HeadlessCpuMirror;
+    ParticleSpace::ParticleExecutionRoute ParticleRoute       = ParticleSpace::ParticleExecutionRoute::HeadlessCpuMirror;
+    bool                                 AnyRealGpuDispatched = false;
+    bool                                 AllRealGpuDispatched = false;
+};
+
 class SimulationCoordinatorExtension
 {
 public:
@@ -90,12 +99,19 @@ public:
 
     [[nodiscard]] bool QueryInitialized() const noexcept { return Initialized_; }
     [[nodiscard]] bool QuerySuspended() const noexcept { return Suspended_; }
-    void               SetShouldUpdate(bool shouldUpdate) noexcept { ShouldUpdate_ = shouldUpdate; }
+    void               SetShouldUpdate(bool shouldUpdate) noexcept
+    {
+        ShouldUpdate_ = shouldUpdate;
+        Deformables_.SetShouldUpdate(shouldUpdate);
+    }
     [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
 
 #if FRONTIER_FLUID_HAS_VULKAN
     [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
 #endif
+
+    /// Honest consolidated execution route summary across Deformable, Fluid, and Particle GPU executors.
+    [[nodiscard]] SimulationExecutionRouteSummary InspectExecutionRoutes() const noexcept;
 
     // Cross-domain scene authoring & external state sync
     void AssignCameraWorldPosition(const std::array<float, 3>& cameraPositionMeters) noexcept;

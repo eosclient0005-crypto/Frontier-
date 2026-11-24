@@ -76,7 +76,7 @@ bool DeformableExtension::Initialize() noexcept
 
 void DeformableExtension::Tick(double deltaSeconds) noexcept
 {
-    if (!Initialized_ || Suspended_ || deltaSeconds <= 0.0)
+    if (!Initialized_ || Suspended_ || !ShouldUpdate_ || deltaSeconds <= 0.0)
     {
         return;
     }
@@ -147,6 +147,15 @@ void DeformableExtension::Finalize() noexcept
     Suspended_       = false;
     Initialized_     = false;
 }
+
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+bool DeformableExtension::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+{
+    const bool execOk  = VulkanExecutor_.AttachVulkanInterchange(interchange);
+    const bool worldOk = WorldRegistry_.AttachVulkanInterchange(interchange);
+    return execOk && worldOk;
+}
+#endif
 
 void DeformableExtension::AssignCameraWorldPosition(const std::array<float, 3>& cameraPositionMeters) noexcept
 {

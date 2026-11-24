@@ -12,10 +12,12 @@
 
 #include "Engine/SimulationSpace/Deformable/DeformablePhysicsCoupling.h"
 #include "Engine/SimulationSpace/Deformable/DeformableTypes.h"
+#include "Engine/SimulationSpace/Deformable/DeformableVulkanExecutor.h"
 
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <span>
 #include <string>
 #include <vector>
@@ -43,25 +45,27 @@ enum class DeformableActivityTier : uint8_t
 
 struct DeformableWorldInstance
 {
-    uint32_t                          InstanceId          = 0u;
-    std::string                       InstanceName        {};
-    std::array<float, 3>              WorldOriginMeters   { 0.0f, 0.0f, 0.0f };
-    DeformableBody                    Body                {};
-    DeformableSimulationConfiguration Configuration       {};
-    DeformableActivityTier            ActivityTier        = DeformableActivityTier::FullRate;
-    uint64_t                          SteppedTickCount    = 0ull;
-    float                             LastCameraDistanceM = 0.0f;
-    bool                              Enabled             = true;
+    uint32_t                                  InstanceId          = 0u;
+    std::string                               InstanceName        {};
+    std::array<float, 3>                      WorldOriginMeters   { 0.0f, 0.0f, 0.0f };
+    DeformableBody                            Body                {};
+    DeformableSimulationConfiguration         Configuration       {};
+    std::unique_ptr<DeformableVulkanExecutor> GpuExecutor         {};
+    DeformableActivityTier                    ActivityTier        = DeformableActivityTier::FullRate;
+    uint64_t                                  SteppedTickCount    = 0ull;
+    float                                     LastCameraDistanceM = 0.0f;
+    bool                                      Enabled             = true;
 };
 
 struct DeformableWorldStepSummary
 {
-    uint32_t TotalInstances    = 0u;
-    uint32_t FullRateCount     = 0u;
-    uint32_t HalfRateCount     = 0u;
-    uint32_t SleepingCount     = 0u;
-    uint32_t TotalActivePoints = 0u;
-    uint32_t TotalActiveTets   = 0u;
+    uint32_t TotalInstances     = 0u;
+    uint32_t FullRateCount      = 0u;
+    uint32_t HalfRateCount      = 0u;
+    uint32_t SleepingCount      = 0u;
+    uint32_t TotalActivePoints  = 0u;
+    uint32_t TotalActiveTets    = 0u;
+    uint32_t GpuDispatchedCount = 0u;
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -73,6 +77,11 @@ class DeformableWorldRegistry
 public:
     void SetCullingPolicy(const DeformableWorldCullingPolicy& policy) noexcept { Policy_ = policy; }
     [[nodiscard]] const DeformableWorldCullingPolicy& InspectCullingPolicy() const noexcept { return Policy_; }
+
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+    /// Attaches a live Vulkan 1.2 interchange to all existing and future world deformable executors.
+    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+#endif
 
     /// Spawns a new deformable instance from one of the 9 built-in DeformablePresetKind presets at `worldOriginMeters`.
     [[nodiscard]] uint32_t SpawnPreset(
@@ -106,8 +115,12 @@ public:
 
 private:
     static void TranslateBodyBy(DeformableBody& body, const std::array<float, 3>& offsetMeters) noexcept;
+    void        InitializeInstanceExecutor(DeformableWorldInstance& inst);
 
     DeformableWorldCullingPolicy         Policy_          {};
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+    GeometricRaster::VulkanInterchange*  Interchange_     = nullptr;
+#endif
     std::vector<DeformableWorldInstance> Instances_       {};
     uint32_t                             NextInstanceId_  = 1u;
     uint64_t                             WorldTickIndex_  = 0ull;

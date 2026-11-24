@@ -56,6 +56,13 @@ bool ComponentSimulationPreviewDriver::StartPreview(
 
     Coordinator_ = std::make_unique<SimulationCoordinatorExtension>(
         SimulationSceneCodec::BuildCoordinatorParameters(sceneDoc));
+    Coordinator_->SetShouldUpdate(ShouldUpdate_);
+#if FRONTIER_FLUID_HAS_VULKAN
+    if (Interchange_ != nullptr)
+    {
+        (void)Coordinator_->AttachVulkanInterchange(Interchange_);
+    }
+#endif
 
     Sequence_ = std::make_unique<Lifecycle::LifecycleSequence>();
     (void)Sequence_->RegisterParticipant("ComponentSimPreview", *Coordinator_);
@@ -81,7 +88,7 @@ void ComponentSimulationPreviewDriver::StepPreview(
     double deltaSeconds,
     const std::array<float, 3>& cameraWorldPos) noexcept
 {
-    if (RunStatus_ != PreviewRunStatus::Running || !Coordinator_ || !Sequence_)
+    if (RunStatus_ != PreviewRunStatus::Running || !ShouldUpdate_ || !Coordinator_ || !Sequence_)
     {
         return;
     }
@@ -89,6 +96,23 @@ void ComponentSimulationPreviewDriver::StepPreview(
     const double clampedDt = std::clamp(deltaSeconds, 0.0005, 0.05);
     Sequence_->Tick(clampedDt);
 }
+
+void ComponentSimulationPreviewDriver::SetShouldUpdate(bool shouldUpdate) noexcept
+{
+    ShouldUpdate_ = shouldUpdate;
+    if (Coordinator_)
+    {
+        Coordinator_->SetShouldUpdate(shouldUpdate);
+    }
+}
+
+#if FRONTIER_FLUID_HAS_VULKAN
+bool ComponentSimulationPreviewDriver::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+{
+    Interchange_ = interchange;
+    return Coordinator_ ? Coordinator_->AttachVulkanInterchange(interchange) : (interchange != nullptr && interchange->Ready());
+}
+#endif
 
 bool ComponentSimulationPreviewDriver::PausePreview() noexcept
 {
@@ -141,6 +165,15 @@ SimulationCoordinatorTelemetry ComponentSimulationPreviewDriver::InspectTelemetr
         return {};
     }
     return Coordinator_->InspectTelemetry();
+}
+
+SimulationExecutionRouteSummary ComponentSimulationPreviewDriver::InspectExecutionRoutes() const noexcept
+{
+    if (!Coordinator_)
+    {
+        return {};
+    }
+    return Coordinator_->InspectExecutionRoutes();
 }
 
 std::vector<PreviewSurfaceSnapshot> ComponentSimulationPreviewDriver::ExtractDeformableRenderSurfaces() const

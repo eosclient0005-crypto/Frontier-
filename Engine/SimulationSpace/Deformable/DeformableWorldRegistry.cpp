@@ -72,6 +72,40 @@ void DeformableWorldRegistry::TranslateBodyBy(DeformableBody& body, const std::a
     body.GroundY                  += offset[1];
 }
 
+void DeformableWorldRegistry::InitializeInstanceExecutor(DeformableWorldInstance& inst)
+{
+    if (!inst.GpuExecutor)
+    {
+        inst.GpuExecutor = std::make_unique<DeformableVulkanExecutor>();
+    }
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+    if (Interchange_ != nullptr)
+    {
+        (void)inst.GpuExecutor->AttachVulkanInterchange(Interchange_);
+    }
+#endif
+    (void)inst.GpuExecutor->InitializeForBody(inst.Body, inst.Configuration);
+}
+
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+bool DeformableWorldRegistry::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+{
+    Interchange_ = interchange;
+    bool allOk = (interchange != nullptr && interchange->Ready());
+    for (auto& inst : Instances_)
+    {
+        if (!inst.GpuExecutor)
+        {
+            inst.GpuExecutor = std::make_unique<DeformableVulkanExecutor>();
+        }
+        const bool attached = inst.GpuExecutor->AttachVulkanInterchange(interchange);
+        const bool inited   = inst.GpuExecutor->InitializeForBody(inst.Body, inst.Configuration);
+        allOk = allOk && attached && inited;
+    }
+    return allOk;
+}
+#endif
+
 uint32_t DeformableWorldRegistry::SpawnPreset(
     DeformablePresetKind kind,
     const std::array<float, 3>& worldOriginMeters,
@@ -85,6 +119,7 @@ uint32_t DeformableWorldRegistry::SpawnPreset(
     inst.InstanceName = instanceName.empty()
         ? (inst.Body.PresetId + "_" + std::to_string(inst.InstanceId))
         : std::move(instanceName);
+    InitializeInstanceExecutor(inst);
 
     Instances_.push_back(std::move(inst));
     return Instances_.back().InstanceId;
@@ -119,6 +154,7 @@ uint32_t DeformableWorldRegistry::SpawnFromSoftBodyFile(
 
     TranslateBodyBy(inst.Body, worldOriginMeters);
     inst.InstanceName = instanceName.empty() ? doc.PresetId : std::move(instanceName);
+    InitializeInstanceExecutor(inst);
     Instances_.push_back(std::move(inst));
     return Instances_.back().InstanceId;
 }
@@ -198,7 +234,19 @@ DeformableWorldStepSummary DeformableWorldRegistry::StepWorld(
             {
                 DeformableSimulationConfiguration reduced = inst.Configuration;
                 reduced.Substeps = std::max(2u, reduced.Substeps / 2u);
-                XpbdConstraintSolver::Step(inst.Body, dtSeconds * 2.0f, reduced, simTimeSeconds, windPulse, sharedCoupling);
+                if (inst.GpuExecutor && inst.GpuExecutor->Ready())
+                {
+                    (void)inst.GpuExecutor->ExecuteTickInPlace(
+                        inst.Body, dtSeconds * 2.0f, reduced, simTimeSeconds, windPulse, sharedCoupling);
+                    if (inst.GpuExecutor->InspectTelemetry().RealGpuDispatched)
+                    {
+                        ++summary.GpuDispatchedCount;
+                    }
+                }
+                else
+                {
+                    XpbdConstraintSolver::Step(inst.Body, dtSeconds * 2.0f, reduced, simTimeSeconds, windPulse, sharedCoupling);
+                }
                 ++inst.SteppedTickCount;
             }
             summary.TotalActivePoints += inst.Body.PointCount;
@@ -208,7 +256,19 @@ DeformableWorldStepSummary DeformableWorldRegistry::StepWorld(
 
         inst.ActivityTier = DeformableActivityTier::FullRate;
         ++summary.FullRateCount;
-        XpbdConstraintSolver::Step(inst.Body, dtSeconds, inst.Configuration, simTimeSeconds, windPulse, sharedCoupling);
+        if (inst.GpuExecutor && inst.GpuExecutor->Ready())
+        {
+            (void)inst.GpuExecutor->ExecuteTickInPlace(
+                inst.Body, dtSeconds, inst.Configuration, simTimeSeconds, windPulse, sharedCoupling);
+            if (inst.GpuExecutor->InspectTelemetry().RealGpuDispatched)
+            {
+                ++summary.GpuDispatchedCount;
+            }
+        }
+        else
+        {
+            XpbdConstraintSolver::Step(inst.Body, dtSeconds, inst.Configuration, simTimeSeconds, windPulse, sharedCoupling);
+        }
         ++inst.SteppedTickCount;
         summary.TotalActivePoints += inst.Body.PointCount;
         summary.TotalActiveTets   += inst.Body.TetCount;
