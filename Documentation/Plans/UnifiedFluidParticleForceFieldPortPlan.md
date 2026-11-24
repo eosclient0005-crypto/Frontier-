@@ -82,7 +82,7 @@ Phase 5: Serialization, Cross-Thread Coupling & Headless Visual Verification Exh
 
 Frontier enforces strict naming rules across all C++20 identifiers, `.slang` shader identifiers, and filenames: zero `And` conjunctions, `Model` permitted **exclusively** for ForceFields (`ForceModel`, `TurbulenceModel`, `StreamTransportModel`, `VectorFieldModel`), and banned terms (`Law`, `Emitter`/`Emit`, `Flow`, `Vortex`, `Domain`, `Mesh`, `Palette`, `Pool`, `Catalog`, `Studio`, `Pass`, `Stage`, `Pipeline`, `Cache`, `Store`, `Snapshot`, `Item`, `Card`, `Element`, `Entity`, `Asset`, `System`) strictly barred from code identifiers.
 
-> **Important**: TOML document keys (e.g., `LayerSpecifications.toml`, `Presets/*.toml`, `ParticleTemplates/*.toml`) and user-facing UI labels (e.g., `"Vortex Column"`, `"Gas Domain"`) remain **100% verbatim** to maintain wire compatibility with all `54` presets and `71` templates. Only C++20 / `.slang` code identifiers and filenames use the compliant Frontier names below:
+> **Important**: Document keys inside Frontier's Space Content files (`EngineContent/Simulation/LayerSpecifications.VolumetricSpace`, `Presets/*.FluidGrid`, `ParticleTemplates/*.ParticleSpace` — using Frontier's registered Data-Driven Space Content suffixes in `Engine/Serialization/Container/SuffixRegistry.{h,cpp}`, never `.toml`) and user-facing UI labels (e.g., `"Vortex Column"`, `"Gas Domain"`) remain **100% verbatim** to maintain wire compatibility with all `54` presets and `71` templates. Only C++20 / `.slang` code identifiers and filenames use the compliant Frontier names below:
 
 | HTML Reference Term | C++20 / `.slang` Compliant Identifier | UI / TOML Parity Note |
 | :--- | :--- | :--- |
@@ -190,10 +190,10 @@ Engine/
         ├── FluidGridCodec.{h,cpp}                   # .FluidGrid / .VolumetricSpace serialization
         └── ParticleSpaceCodec.{h,cpp}               # .ParticleSpace serialization (stacks + tracks + custom solids)
 
-EngineContent/Simulation/                            # Verbatim data copied from reference (single source of truth)
-├── LayerSpecifications.toml                         # Canonical 28 HTML layers + Frontier additive codes 220 (XPBD) & 221 (Collisions)
-├── Presets/*.toml                                   # All 54 reference Fluid/Force/Particle scene presets
-└── ParticleTemplates/*.toml                         # All 71 reference Particle templates
+EngineContent/Simulation/                            # Frontier Data-Driven Space Content (SuffixRegistry.h — zero .toml files)
+├── LayerSpecifications.VolumetricSpace              # Canonical 28 HTML layers + Frontier additive codes 220 (XPBD) & 221 (Collisions)
+├── Presets/*.FluidGrid                              # All 54 reference Fluid/Force/Particle scene presets
+└── ParticleTemplates/*.ParticleSpace                # All 71 reference Particle templates
 
 Exhibits/                                            # PHASE 5 (Automated Numeric + Visual Verification)
 ├── ForceFieldValidation.cpp                         # CPU vs. GPU .slang bit-parity across all 20 models × 7 falloffs + Jolt coupling
@@ -508,5 +508,5 @@ Every phase closes ONLY when its automated C++ validation executable passes `100
 | **S24** | Existing `Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.{h,cpp}` (`80`-byte `RigidColliderProxy` SSBO) + `FluidShaders.js` `ColliderChunk` (`L494–L514`) | `Engine/Shaders/ParticleSpace/ParticleCollisionCompute.slang` + `ForceFieldPhysicsCoupling` two-way impulse readback | Particles bounce with restitution + Coulomb friction + surface velocity off live Jolt `Sphere`, `OrientedBox`, `Capsule`, and baked `CompoundHull` SDFs; atomic impulse readback deflects dynamic Jolt rigid bodies on `PhysicsThread`. |
 | **S25** | Uniform 3D Spatial-Hash Grid (`CountCells` → Blelloch `PrefixSum` → `Scatter` → `Resolve27Neighbors`) | `Engine/Shaders/ParticleSpace/ParticleSpatialHashCompute.slang` | `10,000+` colliding spheres settle under gravity in a box with `< 1%` overlap, exact momentum/friction response, and `0` NaNs over `300` steps. |
 | **S26** | `Experimental/ClothEditor/Engine/WebGpuClothAccelerator.js` (`L9–L100` `packGpuNetworkTables`, `L201–L435` `predictInertia`/`resetXpbdDuals`/`solveXpbdSeamBatch`/`solveXpbdFaceBatch`/`solveXpbdHingeBatch`, `L609–L653` `finalizeSubstep`) | `Engine/ParticleSpace/ParticleXpbdNetworkBuilder.{h,cpp}` + `Engine/Shaders/ParticleSpace/ParticleXpbdCompute.slang` | Conflict-colored zero-atomic GPU XPBD matches `ClothEditor` reference XPBD vertex positions on a pinned `16×16` orthotropic `ClothGrid` under gravity + wind (`< 1e-3`), plus stable `Spiderweb` / `CablesChains` / `FloraBed` strands over `4` substeps × `16` iterations + unilateral contact against Jolt `RigidColliderProxy`. |
-| **S27** | `LayerSpecifications.toml` additive codes `220` & `221` + UI controls in `FluidInspectorRouter` | `EngineContent/Simulation/LayerSpecifications.toml` + `ParticleGpuPhysicsValidation.cpp` (full GPU physics suites) | `ParticleGpuPhysicsValidation` passes `100%` (both all `71` 1:1 HTML templates unchanged AND new XPBD Cloth/Web + Jolt two-way + spatial-hash self-collision suites). |
+| **S27** | `LayerSpecifications.VolumetricSpace` additive codes `220` & `221` + UI controls in `FluidInspectorRouter` | `EngineContent/Simulation/LayerSpecifications.VolumetricSpace` + `ParticleGpuPhysicsValidation.cpp` (full GPU physics suites) | `ParticleGpuPhysicsValidation` passes `100%` (both all `71` 1:1 HTML templates unchanged AND new XPBD Cloth/Web + Jolt two-way + spatial-hash self-collision suites). |
 | **S28** | Phase 5 Codecs & End-to-End Integration | `Engine/Codecs/Simulation/{ForceFieldCodec,FluidGridCodec,ParticleSpaceCodec}.{h,cpp}` + `CMakeLists.txt` + `EditorLifecycle.cpp` | `.ForceField`, `.FluidGrid`, `.VolumetricSpace`, and `.ParticleSpace` round-trip byte-identical; zero `BannedWordsVocabulary.md` / `And` violations across all added files; all 4 new `CTest` validation executables + existing physics/engine suites green. |

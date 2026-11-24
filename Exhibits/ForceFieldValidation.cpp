@@ -125,9 +125,9 @@ void ValidateKeyTrackEnvelopes()
 void ValidateEffectLayerSpecifications(const fs::path& root)
 {
     std::string err;
-    const std::string specPath = (root / "EngineContent/Simulation/LayerSpecifications.toml").string();
+    const std::string specPath = (root / "EngineContent/Simulation/LayerSpecifications.VolumetricSpace").string();
     const auto specsOpt = LoadLayerSpecificationsFromFile(specPath, &err);
-    CheckCondition(specsOpt.has_value(), "LayerSpecifications.toml loads cleanly");
+    CheckCondition(specsOpt.has_value(), "LayerSpecifications.VolumetricSpace loads cleanly");
     if (!specsOpt.has_value()) return;
 
     CheckCondition(specsOpt->SpecificationHash == "885cc8c5a43d9053", "SpecificationHash matches golden FNV-1a digest 885cc8c5a43d9053");
@@ -138,9 +138,9 @@ void ValidateEffectLayerSpecifications(const fs::path& root)
     ForceFieldRegister reg;
     for (const auto& entry : fs::directory_iterator(root / "EngineContent/Simulation/Presets"))
     {
-        if (entry.path().extension() != ".toml") continue;
+        if (entry.path().extension() != ".FluidGrid") continue;
         const auto doc = ParseTomlSubset(ReadTextFile(entry.path()), &err);
-        CheckCondition(doc.has_value(), "Preset TOML parses cleanly");
+        CheckCondition(doc.has_value(), "Preset .FluidGrid parses cleanly");
         if (!doc.has_value()) continue;
         ++presetCount;
         totalLoadedForces += reg.LoadFromTomlTable(*doc);
@@ -148,7 +148,7 @@ void ValidateEffectLayerSpecifications(const fs::path& root)
         auto lease = reg.AcquirePublishedReading();
         CheckCondition(lease.Valid() && lease->ActiveCount == published, "Wait-free reading lease matches published count");
     }
-    CheckCondition(presetCount == 54u, "All 54 Gas Presets/*.toml loaded");
+    CheckCondition(presetCount == 54u, "All 54 Gas Presets/*.FluidGrid loaded");
     CheckCondition(totalLoadedForces > 40u, "Loaded authentic [[Force]] entries across all 54 presets");
 }
 

@@ -332,7 +332,9 @@ bool ParticleTemplateRegistry::LoadFromDirectory(
 
     for (const auto& dirEntry : fs::directory_iterator(dirPath))
     {
-        if (!dirEntry.is_regular_file() || dirEntry.path().extension() != ".toml") continue;
+        if (!dirEntry.is_regular_file()) continue;
+        const std::string ext = dirEntry.path().extension().string();
+        if (ext != ".ParticleSpace" && ext != ".particlespace") continue;
 
         std::string parseErr;
         const auto docOpt = SimulationSpace::EffectLayers::ParseTomlSubset(ReadFileUtf8(dirEntry.path()), &parseErr);
