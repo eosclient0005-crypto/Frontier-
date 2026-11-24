@@ -17,8 +17,12 @@
 #include "Engine/SimulationSpace/ComponentSimulationPreviewDriver.h"
 #include "Engine/SimulationSpace/SimulationBudgetGovernor.h"
 #include "Engine/SimulationSpace/SimulationCheckpointBuffer.h"
+#include "Engine/SimulationSpace/SimulationEventTimeline.h"
 #include "Engine/SimulationSpace/SimulationGpuRenderFeed.h"
+#include "Engine/SimulationSpace/SimulationInteractionBridge.h"
+#include "Engine/SimulationSpace/SimulationSpatialQuery.h"
 #include "Engine/SimulationSpace/SimulationTelemetryProfiler.h"
+#include "Engine/SimulationSpace/SimulationTriggerRouter.h"
 
 #include <array>
 #include <cstdint>
@@ -95,6 +99,26 @@ public:
     }
     [[nodiscard]] const SimulationTelemetryProfiler& InspectProfiler() const noexcept { return Profiler_; }
 
+    /// Deterministic multi-domain event timeline (evaluated automatically during Tick / StepSingleTick and rewound on RewindToCheckpoint).
+    [[nodiscard]] SimulationEventTimeline&       AccessEventTimeline() noexcept { return EventTimeline_; }
+    [[nodiscard]] const SimulationEventTimeline& InspectEventTimeline() const noexcept { return EventTimeline_; }
+
+    /// Trigger-zone router evaluated explicitly against a live TriggerDomainPool in zero allocations.
+    [[nodiscard]] SimulationTriggerRouter&       AccessTriggerRouter() noexcept { return TriggerRouter_; }
+    [[nodiscard]] const SimulationTriggerRouter& InspectTriggerRouter() const noexcept { return TriggerRouter_; }
+    [[nodiscard]] uint32_t                       EvaluateTriggers(const TriggerDomainPool& triggerPool) noexcept;
+
+    /// Zero-allocation interactive manipulation & multi-domain spatial probe helpers.
+    [[nodiscard]] SoftBodyGrabHandle       PickSoftBodyPoint(const std::array<float, 3>& rayOrigin, const std::array<float, 3>& rayDir, float maxDistM = 0.25f) const noexcept;
+    [[nodiscard]] bool                     BeginSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept;
+    [[nodiscard]] bool                     MoveSoftBodyGrab(const SoftBodyGrabHandle& handle, const std::array<float, 3>& targetMeters) noexcept;
+    void                                   ReleaseSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept;
+    [[nodiscard]] uint32_t                 InjectFluidBrushStroke(const std::array<float, 3>& centreMeters, const std::array<float, 3>& velocityMps, float radiusMeters, float density = 1.5f, float temp = 0.5f) noexcept;
+    [[nodiscard]] RadialBlastReport        InjectRadialBlastImpulse(const std::array<float, 3>& centreMeters, float radiusMeters, float peakSpeedMps, float fluidTempBoost = 1.2f) noexcept;
+    [[nodiscard]] SimulationPointProbe     SampleWorldPoint(const std::array<float, 3>& worldPosMeters, const std::array<float, 3>& probeVelocityMps = { 0.0f, 0.0f, 0.0f }) const noexcept;
+    [[nodiscard]] SimulationSphereSummary  QuerySphereInfluence(const std::array<float, 3>& centreMeters, float radiusMeters) const noexcept;
+    [[nodiscard]] SimulationBoundsSnapshot ComputeDomainWorldBounds() const noexcept;
+
     /// Edit-mode / runtime fast-skip toggle (when false, Tick() returns immediately in 0.00 ms).
     void               SetShouldUpdate(bool shouldUpdate) noexcept;
     [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
@@ -138,6 +162,8 @@ private:
     bool                                            BudgetGovernorEnabled_ = false;
     std::unique_ptr<SimulationCheckpointBuffer>     Checkpoints_    {};
     SimulationTelemetryProfiler                     Profiler_       {};
+    SimulationEventTimeline                         EventTimeline_  {};
+    SimulationTriggerRouter                         TriggerRouter_  {};
 };
 
 } // namespace Frontier::SimulationSpace

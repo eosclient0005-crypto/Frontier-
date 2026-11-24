@@ -61,6 +61,8 @@ bool WorldSimulationSession::MountPreparedScene(const SimulationSceneDocument& s
     ActiveScene_ = sceneDoc;
     Profiler_.Reset();
     BudgetGovernor_.Reset();
+    EventTimeline_.Rewind(-1.0);
+    TriggerRouter_.ClearAll();
     if (Checkpoints_)
     {
         Checkpoints_->PrewarmForCoordinator(*Coordinator_);
@@ -132,6 +134,7 @@ void WorldSimulationSession::Tick(double deltaSeconds, const std::array<float, 3
     Coordinator_->AssignCameraWorldPosition(cameraWorldPos);
     const double clampedDt = std::clamp(deltaSeconds, 0.0005, 0.05);
     Sequence_->Tick(clampedDt);
+    (void)EventTimeline_.EvaluateUpToTime(Coordinator_->InspectTelemetry().AccumulatedSeconds, *Coordinator_);
     const auto t1 = std::chrono::steady_clock::now();
 
     const float elapsedUs = static_cast<float>(
@@ -166,6 +169,7 @@ bool WorldSimulationSession::StepSingleTick(
     const double clampedDt = std::clamp(fixedDeltaSeconds, 0.0005, 0.05);
     const auto t0 = std::chrono::steady_clock::now();
     Sequence_->Tick(clampedDt);
+    (void)EventTimeline_.EvaluateUpToTime(Coordinator_->InspectTelemetry().AccumulatedSeconds, *Coordinator_);
     const auto t1 = std::chrono::steady_clock::now();
     Coordinator_->SetShouldUpdate(prevShouldUpdate);
 
@@ -209,7 +213,87 @@ uint64_t WorldSimulationSession::CaptureCheckpoint()
 bool WorldSimulationSession::RewindToCheckpoint(uint32_t chronologicalOrdinal)
 {
     if (!Coordinator_ || !Checkpoints_) return false;
-    return Checkpoints_->RestoreByOrdinal(chronologicalOrdinal, *Coordinator_);
+    if (!Checkpoints_->RestoreByOrdinal(chronologicalOrdinal, *Coordinator_))
+    {
+        return false;
+    }
+    EventTimeline_.Rewind(Coordinator_->InspectTelemetry().AccumulatedSeconds);
+    return true;
+}
+
+uint32_t WorldSimulationSession::EvaluateTriggers(const TriggerDomainPool& triggerPool) noexcept
+{
+    if (!Coordinator_) return 0u;
+    return TriggerRouter_.EvaluateAndDispatch(triggerPool, *Coordinator_);
+}
+
+SoftBodyGrabHandle WorldSimulationSession::PickSoftBodyPoint(
+    const std::array<float, 3>& rayOrigin,
+    const std::array<float, 3>& rayDir,
+    float maxDistM) const noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationInteractionBridge::PickSoftBodyPoint(*Coordinator_, rayOrigin, rayDir, maxDistM);
+}
+
+bool WorldSimulationSession::BeginSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept
+{
+    return Coordinator_ && SimulationInteractionBridge::BeginSoftBodyGrab(*Coordinator_, handle);
+}
+
+bool WorldSimulationSession::MoveSoftBodyGrab(
+    const SoftBodyGrabHandle& handle,
+    const std::array<float, 3>& targetMeters) noexcept
+{
+    return Coordinator_ && SimulationInteractionBridge::MoveSoftBodyGrab(*Coordinator_, handle, targetMeters);
+}
+
+void WorldSimulationSession::ReleaseSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept
+{
+    if (Coordinator_) SimulationInteractionBridge::ReleaseSoftBodyGrab(*Coordinator_, handle);
+}
+
+uint32_t WorldSimulationSession::InjectFluidBrushStroke(
+    const std::array<float, 3>& centreMeters,
+    const std::array<float, 3>& velocityMps,
+    float radiusMeters,
+    float density,
+    float temp) noexcept
+{
+    if (!Coordinator_) return 0u;
+    return SimulationInteractionBridge::InjectFluidBrushStroke(*Coordinator_, centreMeters, velocityMps, radiusMeters, density, temp);
+}
+
+RadialBlastReport WorldSimulationSession::InjectRadialBlastImpulse(
+    const std::array<float, 3>& centreMeters,
+    float radiusMeters,
+    float peakSpeedMps,
+    float fluidTempBoost) noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationInteractionBridge::InjectRadialBlastImpulse(*Coordinator_, centreMeters, radiusMeters, peakSpeedMps, fluidTempBoost);
+}
+
+SimulationPointProbe WorldSimulationSession::SampleWorldPoint(
+    const std::array<float, 3>& worldPosMeters,
+    const std::array<float, 3>& probeVelocityMps) const noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationSpatialQuery::SampleWorldPoint(*Coordinator_, worldPosMeters, probeVelocityMps);
+}
+
+SimulationSphereSummary WorldSimulationSession::QuerySphereInfluence(
+    const std::array<float, 3>& centreMeters,
+    float radiusMeters) const noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationSpatialQuery::QuerySphereInfluence(*Coordinator_, centreMeters, radiusMeters);
+}
+
+SimulationBoundsSnapshot WorldSimulationSession::ComputeDomainWorldBounds() const noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationSpatialQuery::ComputeDomainWorldBounds(*Coordinator_);
 }
 
 void WorldSimulationSession::SetShouldUpdate(bool shouldUpdate) noexcept
