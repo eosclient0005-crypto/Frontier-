@@ -976,6 +976,62 @@ void StepParticleCloudCpu(
     record.LastUniformBlock = uniforms;
 }
 
+void StepTrailHistoryCpu(
+    ParticleCloudStateRecord& record,
+    const ParticleTrailUpdateUniformBlock& uniforms)
+{
+    const uint32_t capacity    = std::max(1u, static_cast<uint32_t>(uniforms.LayoutHeadAdvance[0] + 0.5f));
+    const uint32_t trailLength = std::max(2u, static_cast<uint32_t>(uniforms.LayoutHeadAdvance[1] + 0.5f));
+    const uint32_t head        = static_cast<uint32_t>(std::max(0.0f, uniforms.LayoutHeadAdvance[2] + 0.5f));
+    const bool advance         = (uniforms.LayoutHeadAdvance[3] > 0.5f);
+    const bool reset           = (uniforms.ResetLifetimePad[0] > 0.5f);
+    const float lifetime       = uniforms.ResetLifetimePad[1];
+
+    const size_t totalSlots = static_cast<size_t>(capacity) * static_cast<size_t>(trailLength);
+    if (record.TrailSamples.size() != totalSlots)
+    {
+        record.TrailSamples.assign(totalSlots, std::array<float, 4> { 0.0f, 0.0f, 0.0f, 0.0f });
+    }
+    if (record.TrailScratch.size() != totalSlots)
+    {
+        record.TrailScratch.resize(totalSlots);
+    }
+
+    const uint32_t safeCap = std::min<uint32_t>(capacity, static_cast<uint32_t>(record.ReadStates.size()));
+    for (uint32_t p = 0u; p < safeCap; ++p)
+    {
+        const auto& current  = record.ReadStates[p].PositionAge;
+        const auto& previous = (p < record.PreviousPositions.size()) ? record.PreviousPositions[p] : current;
+        const float dx = current[0] - previous[0];
+        const float dy = current[1] - previous[1];
+        const float dz = current[2] - previous[2];
+        const bool jumped = (dx * dx + dy * dy + dz * dz) > 4.0f;
+        const bool baseRespawn = reset || (current[3] < previous[3]) || jumped;
+        const bool frozen = (current[3] >= lifetime) && (lifetime > 0.0f);
+        const size_t rowBase = static_cast<size_t>(p) * static_cast<size_t>(trailLength);
+
+        for (uint32_t slot = 0u; slot < trailLength; ++slot)
+        {
+            const auto& old = record.TrailSamples[rowBase + slot];
+            if (baseRespawn || old[3] < 0.5f)
+            {
+                record.TrailScratch[rowBase + slot] = { current[0], current[1], current[2], 1.0f };
+            }
+            else if (advance && slot == head && !frozen)
+            {
+                record.TrailScratch[rowBase + slot] = { current[0], current[1], current[2], 1.0f };
+            }
+            else
+            {
+                record.TrailScratch[rowBase + slot] = old;
+            }
+        }
+    }
+
+    std::swap(record.TrailSamples, record.TrailScratch);
+    record.LastTrailUniforms = uniforms;
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                PARTICLEGPUSIMULATION
 //------------------------------------------------------------------------------------------------------------------------
@@ -988,7 +1044,13 @@ void ParticleGpuSimulation::ClearAll() noexcept
 
 void ParticleGpuSimulation::ResetAll() noexcept
 {
-    for (ParticleCloudStateRecord& rec : Records) rec.NeedsReset = true;
+    for (ParticleCloudStateRecord& rec : Records)
+    {
+        rec.NeedsReset = true;
+        rec.TrailHead = 0u;
+        rec.TrailClock = 0.0f;
+        rec.TrailNeedsReset = true;
+    }
 }
 
 void ParticleGpuSimulation::ResetCloud(const std::string_view nodeId) noexcept
@@ -998,6 +1060,9 @@ void ParticleGpuSimulation::ResetCloud(const std::string_view nodeId) noexcept
         if (rec.NodeId == nodeId)
         {
             rec.NeedsReset = true;
+            rec.TrailHead = 0u;
+            rec.TrailClock = 0.0f;
+            rec.TrailNeedsReset = true;
             return;
         }
     }
@@ -1120,6 +1185,31 @@ ParticleCloudStateRecord& ParticleGpuSimulation::EnsureCloudRecord(
     }
 
     RefreshCloudAnchors(*found, node, solidRegistry, simulationTimeSeconds);
+
+    // On-demand spline ribbon history ring buffer (ParticleSimulation.js L82-L95)
+    const bool wantsTrail = (node.Evaluated.Trail != ParticleTrailModeOrdinal::Off);
+    const uint32_t wantedTrailLen = wantsTrail
+        ? ComputeEffectiveTrailLength(node.Evaluated.Count, node.Evaluated.TrailLength)
+        : 0u;
+    if (wantsTrail && (found->TrailLength != wantedTrailLen || found->TrailSamples.size() != static_cast<size_t>(cap) * static_cast<size_t>(wantedTrailLen)))
+    {
+        found->TrailLength = wantedTrailLen;
+        found->TrailHead = 0u;
+        found->TrailClock = 0.0f;
+        found->TrailNeedsReset = true;
+        found->TrailSamples.assign(static_cast<size_t>(cap) * static_cast<size_t>(wantedTrailLen), std::array<float, 4> { 0.0f, 0.0f, 0.0f, 0.0f });
+        found->TrailScratch.resize(found->TrailSamples.size());
+    }
+    else if (!wantsTrail && found->TrailLength != 0u)
+    {
+        found->TrailLength = 0u;
+        found->TrailHead = 0u;
+        found->TrailClock = 0.0f;
+        found->TrailNeedsReset = true;
+        found->TrailSamples.clear();
+        found->TrailScratch.clear();
+    }
+
     return *found;
 }
 
@@ -1167,6 +1257,33 @@ void ParticleGpuSimulation::StepCloudsCpu(
         if (resetNow)
         {
             rec.NeedsReset = false;
+            rec.TrailNeedsReset = true;
+        }
+
+        if (rec.TrailLength >= 2u)
+        {
+            rec.TrailClock += deltaTimeSeconds;
+            const bool advance = (rec.TrailClock >= node.Evaluated.TrailInterval) || rec.TrailNeedsReset;
+            if (advance)
+            {
+                rec.TrailClock = 0.0f;
+                rec.TrailHead = (rec.TrailHead + 1u) % rec.TrailLength;
+            }
+            ParticleTrailUpdateUniformBlock trailU {};
+            trailU.LayoutHeadAdvance = {
+                static_cast<float>(rec.Capacity),
+                static_cast<float>(rec.TrailLength),
+                static_cast<float>(rec.TrailHead),
+                advance ? 1.0f : 0.0f
+            };
+            trailU.ResetLifetimePad = {
+                rec.TrailNeedsReset ? 1.0f : 0.0f,
+                (node.Evaluated.Mode == ParticleSpawnModeOrdinal::Cloner) ? 0.0f : std::max(0.05f, node.Evaluated.Lifetime),
+                0.0f,
+                0.0f
+            };
+            StepTrailHistoryCpu(rec, trailU);
+            rec.TrailNeedsReset = false;
         }
 
         Statistics.ActiveCloudCount    += 1u;

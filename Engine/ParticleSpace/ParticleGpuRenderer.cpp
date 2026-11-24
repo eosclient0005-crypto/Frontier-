@@ -776,4 +776,131 @@ std::vector<ParticleSpriteDrawCall> ParticleGpuRenderer::BuildSpriteRenderCalls(
     return calls;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                        RIBBON UNIFORMS, SPLINES & PLANNER
+//------------------------------------------------------------------------------------------------------------------------
+
+ParticleRibbonUniformBlock BuildParticleRibbonUniforms(
+    const ParticleCloudParameters& params,
+    const ParticleCloudStateRecord& record,
+    const ParticleCameraView& camera,
+    const float simulationTimeSeconds,
+    const float regionHeightMeters,
+    const float haloScale,
+    const float haloAlpha) noexcept
+{
+    ParticleRibbonUniformBlock block {};
+    block.Shape = BuildParticleShapeUniforms(params, record.TextureSide, record.AnchorTexels.Width, record.AnchorTexels.Count);
+    block.Shade = BuildParticleShadeUniforms(params, simulationTimeSeconds, regionHeightMeters);
+    block.ViewProjection = camera.ViewProjection;
+
+    const float viewW = std::max(1.0f, camera.ViewportWidthPx * camera.PixelRatio);
+    const float viewH = std::max(1.0f, camera.ViewportHeightPx * camera.PixelRatio);
+    const float focalPixels = viewH / (2.0f * std::tan(std::max(0.05f, camera.VerticalFovRad) * 0.5f));
+    const uint32_t stride = std::max(1u, static_cast<uint32_t>(std::lround(1.0 / std::max(0.01, static_cast<double>(params.TrailRatio)))));
+    const uint32_t subdivisions = std::clamp(params.TrailSubdivisions, 1u, 4u);
+    const float width = params.TrailWidth * (params.SizeMode == ParticleSizeModeOrdinal::Pixels ? camera.PixelRatio : 1.0f);
+
+    block.CameraPositionFocal    = { camera.CameraPosition[0], camera.CameraPosition[1], camera.CameraPosition[2], focalPixels };
+    block.CameraForwardViewportX = { camera.CameraForward[0], camera.CameraForward[1], camera.CameraForward[2], viewW };
+    block.ViewportYTrailLayout   = { viewH, static_cast<float>(std::max(2u, record.TrailLength)), static_cast<float>(record.TrailHead), static_cast<float>(subdivisions) };
+    block.RibbonWidthTaper       = { static_cast<float>(stride), width, static_cast<float>(params.SizeMode), params.TrailTaper };
+    block.RibbonFadeColourHalo   = { params.TrailFade, static_cast<float>(params.TrailColour), haloScale, haloAlpha };
+    return block;
+}
+
+std::array<float, 3> EvaluateCatmullRomCpu(
+    const std::array<float, 3>& p0,
+    const std::array<float, 3>& p1,
+    const std::array<float, 3>& p2,
+    const std::array<float, 3>& p3,
+    const float u) noexcept
+{
+    const float u2 = u * u;
+    const float u3 = u2 * u;
+    std::array<float, 3> out {};
+    for (size_t k = 0u; k < 3u; ++k)
+    {
+        out[k] = 0.5f * (
+            (2.0f * p1[k])
+            + (-p0[k] + p2[k]) * u
+            + (2.0f * p0[k] - 5.0f * p1[k] + 4.0f * p2[k] - p3[k]) * u2
+            + (-p0[k] + 3.0f * p1[k] - 3.0f * p2[k] + p3[k]) * u3);
+    }
+    return out;
+}
+
+std::array<float, 3> SampleTrailRingPointCpu(
+    const ParticleCloudStateRecord& record,
+    const uint32_t particleIndex,
+    const int32_t k) noexcept
+{
+    if (particleIndex >= record.ReadStates.size()) return { 0.0f, 0.0f, 0.0f };
+    if (k <= 0 || record.TrailLength < 2u || record.TrailSamples.empty())
+    {
+        const auto& live = record.ReadStates[particleIndex].PositionAge;
+        return { live[0], live[1], live[2] };
+    }
+    const int32_t len = static_cast<int32_t>(record.TrailLength);
+    const int32_t offset = static_cast<int32_t>(record.TrailHead) - (k - 1);
+    const int32_t slot = ((offset % len) + len) % len;
+    const size_t idx = static_cast<size_t>(particleIndex) * static_cast<size_t>(record.TrailLength) + static_cast<size_t>(slot);
+    if (idx >= record.TrailSamples.size()) return { 0.0f, 0.0f, 0.0f };
+    const auto& pt = record.TrailSamples[idx];
+    return { pt[0], pt[1], pt[2] };
+}
+
+std::vector<ParticleRibbonDrawCall> ParticleGpuRenderer::BuildRibbonRenderCalls(
+    std::span<const ParticleCloudNode> clouds,
+    const ParticleGpuSimulation& simulation,
+    const ParticleCameraView& camera,
+    const float simulationTimeSeconds,
+    const float regionHeightMeters) const
+{
+    // Reference: ParticleSimulation.js L484-L543 & L585-L586
+    std::vector<ParticleRibbonDrawCall> calls;
+    for (const ParticleCloudNode& node : clouds)
+    {
+        if (!node.Visible || !node.Enabled || node.Halted) continue;
+        const ParticleCloudParameters& p = node.Evaluated;
+        if (p.Trail == ParticleTrailModeOrdinal::Off) continue;
+        const uint32_t strandMode = static_cast<uint32_t>(p.StrandMode);
+        if (strandMode >= 1u && strandMode <= 8u && p.CarrierMode != ParticleCarrierOrdinal::Object3D) continue;
+
+        const ParticleCloudStateRecord* rec = simulation.FindCloudRecord(node.NodeId);
+        if (!rec || rec->TrailLength < 2u || rec->ActiveCount == 0u) continue;
+
+        const uint32_t stride = std::max(1u, static_cast<uint32_t>(std::lround(1.0 / std::max(0.01, static_cast<double>(p.TrailRatio)))));
+        const uint32_t count = std::min(p.Count, rec->TextureSide * rec->TextureSide);
+        const uint32_t trailed = (count + stride - 1u) / stride;
+        const uint32_t subdivisions = std::clamp(p.TrailSubdivisions, 1u, 4u);
+        const uint32_t vertices = trailed * rec->TrailLength * subdivisions * 6u;
+        if (vertices == 0u) continue;
+
+        if (p.Glow > 0.0f)
+        {
+            const ParticleRibbonUniformBlock haloBlock = BuildParticleRibbonUniforms(
+                p, *rec, camera, simulationTimeSeconds, regionHeightMeters, 3.0f, 0.12f * p.Glow);
+            calls.push_back(ParticleRibbonDrawCall {
+                node.NodeId,
+                ParticleBlendOrdinal::Additive,
+                vertices,
+                true,
+                haloBlock
+            });
+        }
+
+        const ParticleRibbonUniformBlock mainBlock = BuildParticleRibbonUniforms(
+            p, *rec, camera, simulationTimeSeconds, regionHeightMeters, 1.0f, 1.0f);
+        calls.push_back(ParticleRibbonDrawCall {
+            node.NodeId,
+            p.Blend,
+            vertices,
+            false,
+            mainBlock
+        });
+    }
+    return calls;
+}
+
 } // namespace Frontier::ParticleSpace

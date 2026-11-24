@@ -51,6 +51,29 @@ struct alignas(16) ParticleSpriteUniformBlock
 };
 static_assert(sizeof(ParticleSpriteUniformBlock) == 512u, "ParticleSpriteUniformBlock must be 512 bytes");
 
+/// Matches ParticleRibbonUniformBlock in ParticleRibbonRasterization.slang byte-for-byte (512 bytes, 16-byte aligned).
+struct alignas(16) ParticleRibbonUniformBlock
+{
+    ParticleShapeUniformBlock Shape {};
+    ParticleShadeUniformBlock Shade {};
+    std::array<float, 16>     ViewProjection         { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+    std::array<float, 4>      CameraPositionFocal    { 0.0f, 0.0f, 10.0f, 940.0f };
+    std::array<float, 4>      CameraForwardViewportX { 0.0f, 0.0f, -1.0f, 1280.0f };
+    std::array<float, 4>      ViewportYTrailLayout   { 720.0f, 24.0f, 0.0f, 2.0f };
+    std::array<float, 4>      RibbonWidthTaper       { 1.0f, 0.01f, 0.0f, 0.6f };
+    std::array<float, 4>      RibbonFadeColourHalo   { 0.7f, 0.0f, 1.0f, 1.0f };
+};
+static_assert(sizeof(ParticleRibbonUniformBlock) == 512u, "ParticleRibbonUniformBlock must be 512 bytes");
+
+struct ParticleRibbonDrawCall
+{
+    std::string                NodeId       {};
+    ParticleBlendOrdinal       Blend        = ParticleBlendOrdinal::Alpha;
+    uint32_t                   VertexCount  = 0u;
+    bool                       IsHaloCall   = false;
+    ParticleRibbonUniformBlock UniformBlock {};
+};
+
 struct ParticleCameraView
 {
     std::array<float, 16> ViewProjection    { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
@@ -152,11 +175,35 @@ void ComputeSpriteDofMetricsCpu(
     float& outPixelDiameter,
     float& outAlphaMultiplier) noexcept;
 
+/// Populates ParticleRibbonUniformBlock for Catmull-Rom spline ribbon rendering (ParticleSimulation.js L484-L543).
+[[nodiscard]] ParticleRibbonUniformBlock BuildParticleRibbonUniforms(
+    const ParticleCloudParameters& params,
+    const ParticleCloudStateRecord& record,
+    const ParticleCameraView& camera,
+    float simulationTimeSeconds,
+    float regionHeightMeters,
+    float haloScale = 1.0f,
+    float haloAlpha = 1.0f) noexcept;
+
+/// Evaluates cubic Catmull-Rom spline matching ParticleRibbonRasterization.slang::EvaluateCatmullRom.
+[[nodiscard]] std::array<float, 3> EvaluateCatmullRomCpu(
+    const std::array<float, 3>& p0,
+    const std::array<float, 3>& p1,
+    const std::array<float, 3>& p2,
+    const std::array<float, 3>& p3,
+    float u) noexcept;
+
+/// Reads trail history point k (0 = live position, 1..TrailLength = ring buffer back-trace).
+[[nodiscard]] std::array<float, 3> SampleTrailRingPointCpu(
+    const ParticleCloudStateRecord& record,
+    uint32_t particleIndex,
+    int32_t k) noexcept;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                PARTICLEGPURENDERER
 //------------------------------------------------------------------------------------------------------------------------
 
-/// Plans sprite, streak, and additive halo GPU render calls across all visible particle clouds.
+/// Plans sprite, streak, ribbon, and additive halo GPU render calls across all visible particle clouds.
 class ParticleGpuRenderer
 {
 public:
@@ -164,6 +211,13 @@ public:
     ~ParticleGpuRenderer() noexcept = default;
 
     [[nodiscard]] std::vector<ParticleSpriteDrawCall> BuildSpriteRenderCalls(
+        std::span<const ParticleCloudNode> clouds,
+        const ParticleGpuSimulation& simulation,
+        const ParticleCameraView& camera,
+        float simulationTimeSeconds,
+        float regionHeightMeters) const;
+
+    [[nodiscard]] std::vector<ParticleRibbonDrawCall> BuildRibbonRenderCalls(
         std::span<const ParticleCloudNode> clouds,
         const ParticleGpuSimulation& simulation,
         const ParticleCameraView& camera,

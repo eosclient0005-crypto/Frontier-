@@ -70,6 +70,14 @@ struct alignas(16) ParticleUpdateUniformBlock
 };
 static_assert(sizeof(ParticleUpdateUniformBlock) == 304u, "ParticleUpdateUniformBlock must be 304 bytes");
 
+/// Matches ParticleTrailUpdateUniformBlock in ParticleTrailUpdateCompute.slang byte-for-byte (32 bytes, 16-byte aligned).
+struct alignas(16) ParticleTrailUpdateUniformBlock
+{
+    std::array<float, 4> LayoutHeadAdvance { 2304.0f, 24.0f, 0.0f, 0.0f }; // capacity, trailLength, head, advance
+    std::array<float, 4> ResetLifetimePad  { 1.0f, 3.0f, 0.0f, 0.0f };     // reset, lifetime (0 for Cloner), pad, pad
+};
+static_assert(sizeof(ParticleTrailUpdateUniformBlock) == 32u, "ParticleTrailUpdateUniformBlock must be 32 bytes");
+
 struct DerezEvaluationReading
 {
     float WaveU    = 0.5f;
@@ -108,6 +116,15 @@ struct ParticleCloudStateRecord
     std::vector<ParticleStateGpuRecord> WriteStates        {};
     std::vector<std::array<float, 4>>   PreviousPositions  {};
     ParticleUpdateUniformBlock          LastUniformBlock   {};
+
+    // On-demand spline ribbon history ring buffer (ParticleSimulation.js L82-L95, L147-L172)
+    uint32_t                            TrailLength        = 0u;
+    uint32_t                            TrailHead          = 0u;
+    float                               TrailClock         = 0.0f;
+    bool                                TrailNeedsReset    = true;
+    std::vector<std::array<float, 4>>   TrailSamples       {};
+    std::vector<std::array<float, 4>>   TrailScratch       {};
+    ParticleTrailUpdateUniformBlock     LastTrailUniforms  {};
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -162,6 +179,11 @@ void StepParticleCloudCpu(
     const ParticleUpdateUniformBlock& uniforms,
     std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords = {},
     const GasVelocityQueryFn& gasVelocityQuery = {});
+
+/// Bit-accurate CPU mirror of ParticleTrailUpdateCompute.slang::ComputeEntry (ring-buffer history up to 96 samples).
+void StepTrailHistoryCpu(
+    ParticleCloudStateRecord& record,
+    const ParticleTrailUpdateUniformBlock& uniforms);
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                PARTICLEGPUSIMULATION
