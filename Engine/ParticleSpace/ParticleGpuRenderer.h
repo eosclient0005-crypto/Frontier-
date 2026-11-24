@@ -135,6 +135,55 @@ struct CarrierSolidFragmentCpuResult
     bool                 Discarded = false;
 };
 
+/// Matches ParticleStrandUniformBlock in ParticleStrandRasterization.slang byte-for-byte (352 bytes, 16-byte aligned).
+struct alignas(16) ParticleStrandUniformBlock
+{
+    std::array<float, 16>               ViewProjection               { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+    std::array<std::array<float, 4>, 8> SwatchStops                  {};
+    std::array<float, 4>                CameraPositionFocal          { 0.0f, 0.0f, 10.0f, 940.0f };
+    std::array<float, 4>                CameraForwardViewportX       { 0.0f, 0.0f, -1.0f, 1280.0f };
+    std::array<float, 4>                OriginRadius                 { 0.0f, 0.0f, 0.0f, 0.5f };
+    std::array<float, 4>                AxisTime                     { 0.0f, 1.0f, 0.0f, 0.0f };
+    std::array<float, 4>                GridCentreHalfX              { 0.0f, 0.0f, 0.0f, 2.0f };
+    std::array<float, 4>                GridHalfYZForceGas           { 2.0f, 2.0f, 0.0f, 0.0f };
+    std::array<float, 4>                ModeVariantCounts            { 0.0f, 0.0f, 36.0f, 36.0f };
+    std::array<float, 4>                SegmentsDetailViewportSwatch { 14.0f, 14.0f, 720.0f, 1.0f };
+    std::array<float, 4>                SagThicknessSwaySpan         { 0.32f, 0.032f, 0.85f, 1.8f };
+    std::array<float, 4>                GlowBrightnessEnvelope       { 0.65f, 1.0f, 1.0f, 0.0f };
+};
+static_assert(sizeof(ParticleStrandUniformBlock) == 352u, "ParticleStrandUniformBlock must be 352 bytes");
+
+struct ParticleStrandDrawCall
+{
+    std::string                  NodeId         {};
+    ParticleStrandOrdinal        Mode           = ParticleStrandOrdinal::Off;
+    ParticleStrandVariantOrdinal Variant        = ParticleStrandVariantOrdinal::Primary;
+    ParticleBlendOrdinal         Blend          = ParticleBlendOrdinal::Alpha;
+    uint32_t                     StrandTotal    = 0u;
+    uint32_t                     StrandSegments = 0u;
+    uint32_t                     VertexCount    = 0u;
+    ParticleStrandUniformBlock   UniformBlock   {};
+};
+
+struct StrandEndpointsCpuResult
+{
+    std::array<float, 3> PointA     { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> PointB     { 0.0f, 0.5f, 0.0f };
+    float                Sag        = 0.0f;
+    float                WidthScale = 1.0f;
+    float                PinB       = 0.0f;
+    float                StyleTag   = 0.0f;
+    float                ColourT    = 0.0f;
+    float                Visible    = 1.0f;
+};
+
+struct StrandFragmentCpuResult
+{
+    std::array<float, 3> Rgb       { 0.0f, 0.0f, 0.0f };
+    float                Alpha     = 0.0f;
+    bool                 Discarded = false;
+};
+
 struct ParticleCameraView
 {
     std::array<float, 16> ViewProjection    { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
@@ -291,11 +340,43 @@ void ComputeSpriteDofMetricsCpu(
 /// Returns true when any active cloud needs a depth buffer clear (ParticleSimulation.js L566-L567).
 [[nodiscard]] bool RequiresParticleDepthBuffer(std::span<const ParticleCloudNode> clouds) noexcept;
 
+/// Populates ParticleStrandUniformBlock (11 modes x 2 variants, ParticleSimulation.js L449-L505).
+[[nodiscard]] ParticleStrandUniformBlock BuildParticleStrandUniforms(
+    const ParticleCloudParameters& params,
+    const ParticleSimulationRegion& region,
+    const ParticleCameraView& camera,
+    float simulationTimeSeconds,
+    uint32_t forceRecordCount = 0u,
+    bool hasGasVolume = false) noexcept;
+
+/// Bit-accurate CPU mirror of ParticleStrandRasterization.slang::EvalStrandEndpoints (modes 1..11).
+[[nodiscard]] StrandEndpointsCpuResult EvaluateStrandEndpointsCpu(
+    const ParticleStrandUniformBlock& uniforms,
+    int32_t slot) noexcept;
+
+/// Bit-accurate CPU mirror of ParticleStrandRasterization.slang::EvalStrandPoint (sag, breeze, lightning jitter).
+[[nodiscard]] std::array<float, 3> EvaluateStrandPointCpu(
+    const ParticleStrandUniformBlock& uniforms,
+    int32_t slot,
+    const StrandEndpointsCpuResult& endpoints,
+    float u,
+    const std::array<float, 3>& externalWind = { 0.0f, 0.0f, 0.0f }) noexcept;
+
+/// Bit-accurate CPU mirror of ParticleStrandRasterization.slang::ParticleStrandFragmentEntry (all 8 material tags).
+[[nodiscard]] StrandFragmentCpuResult EvaluateStrandFragmentCpu(
+    const ParticleStrandUniformBlock& uniforms,
+    const std::array<float, 3>& inputColour,
+    float along,
+    float across,
+    float styleTag,
+    float seed,
+    float inputAlpha) noexcept;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                PARTICLEGPURENDERER
 //------------------------------------------------------------------------------------------------------------------------
 
-/// Plans sprite, streak, ribbon, backing surface, and 3D carrier GPU render calls across all visible particle clouds.
+/// Plans sprite, streak, ribbon, backing surface, 3D carrier, and strand GPU render calls across all visible particle clouds.
 class ParticleGpuRenderer
 {
 public:
@@ -324,6 +405,14 @@ public:
         float simulationTimeSeconds,
         float regionHeightMeters,
         const std::array<float, 3>& backingColour = kDefaultBackingColour) const;
+
+    [[nodiscard]] std::vector<ParticleStrandDrawCall> BuildStrandRenderCalls(
+        std::span<const ParticleCloudNode> clouds,
+        const ParticleSimulationRegion& region,
+        const ParticleCameraView& camera,
+        float simulationTimeSeconds,
+        uint32_t forceRecordCount = 0u,
+        bool hasGasVolume = false) const;
 };
 
 } // namespace Frontier::ParticleSpace
