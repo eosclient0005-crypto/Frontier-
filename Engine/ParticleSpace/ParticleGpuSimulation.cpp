@@ -1429,17 +1429,26 @@ void ParticleVulkanGpuExecutor::ExecuteStep(
     float simulationTimeSeconds,
     float deltaTimeSeconds,
     std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
-    GasVelocitySamplerView headlessGasSampler)
+    GasVelocitySamplerView headlessGasSampler,
+    const void* rigidProxyBytes,
+    uint32_t rigidProxyCount,
+    uint32_t rigidProxyStrideBytes)
 {
     if (!Initialized_ || clouds.empty() || deltaTimeSeconds <= 0.0f) return;
 
-    Telemetry_.ActiveRingSlot = (Telemetry_.ActiveRingSlot + 1u) % kTripleBufferSlots;
+    Telemetry_.ActiveRingSlot           = (Telemetry_.ActiveRingSlot + 1u) % kTripleBufferSlots;
+    Telemetry_.ActiveRigidColliderCount = std::min(rigidProxyCount, kMaxRigidProxies);
+    uint32_t totalExpected = 0u;
+    for (const auto& c : clouds) totalExpected += c.Evaluated.Count;
+    Telemetry_.ActiveParticleCount = std::min(totalExpected, MaxParticleCapacity_);
 
 #if FRONTIER_PARTICLE_HAS_VULKAN
     if (GpuLiveReady_ && Interchange_ != nullptr && Interchange_->Ready())
     {
         // Live Hardware GPU path: ZERO StepCloudsCpu mirror, ZERO mid-frame stalls!
-        DispatchGpuAsync(clouds, region, simulationTimeSeconds, deltaTimeSeconds, forceRecords);
+        DispatchGpuAsync(
+            clouds, region, simulationTimeSeconds, deltaTimeSeconds, forceRecords,
+            rigidProxyBytes, rigidProxyCount, rigidProxyStrideBytes);
         (void)ImpulseReadbackRing_.PollNonBlocking();
         Telemetry_.Route             = ParticleExecutionRoute::VulkanComputeGpu;
         Telemetry_.RealGpuDispatched = true;
@@ -1447,6 +1456,9 @@ void ParticleVulkanGpuExecutor::ExecuteStep(
         return;
     }
 #endif
+
+    (void)rigidProxyBytes;
+    (void)rigidProxyStrideBytes;
 
     // Strict headless CPU fallback ONLY when VulkanInterchange is unavailable/unready
     headlessFallbackSim.StepCloudsCpu(
@@ -1462,6 +1474,25 @@ void ParticleVulkanGpuExecutor::ExecuteStep(
     {
         (void)ImpulseReadbackRing_.PollNonBlocking(Telemetry_.CompletedTicks - 1ull);
     }
+}
+
+ParticleGpuRenderFeedHandle ParticleVulkanGpuExecutor::InspectRenderFeedHandle() const noexcept
+{
+    ParticleGpuRenderFeedHandle feed {};
+    feed.Route                 = Telemetry_.Route;
+    feed.ActiveParticleCount   = Telemetry_.ActiveParticleCount;
+    feed.MaxParticleCapacity   = MaxParticleCapacity_;
+    feed.LastSubmittedTimeline = Telemetry_.LastSubmittedTimeline;
+    feed.GpuResident           = GpuLiveReady_ && Telemetry_.RealGpuDispatched;
+#if FRONTIER_PARTICLE_HAS_VULKAN
+    if (GpuLiveReady_)
+    {
+        feed.StateBufferHandle   = reinterpret_cast<uint64_t>(BufStates_[ActivePong_].BufferHandle);
+        feed.PrevPosBufferHandle = reinterpret_cast<uint64_t>(BufPrevPos_.BufferHandle);
+        feed.ImpulseBufferHandle = reinterpret_cast<uint64_t>(BufImpulseAtomic_.BufferHandle);
+    }
+#endif
+    return feed;
 }
 
 bool ParticleVulkanGpuExecutor::PollAsyncImpulseReadback() noexcept
@@ -1528,6 +1559,49 @@ bool ParticleVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::pa
         return false;
     }
 
+    // Stage F Additive GPU Physics programs (Layer 221 Rigid/Spatial-Hash Collisions + Layer 220 XPBD)
+    const std::array<VkDescriptorType, 7> collSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    };
+    const std::array<VkDescriptorType, 9> hashSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    };
+    const std::array<VkDescriptorType, 8> xpbdSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    };
+    auto tryReg = [&](const char* spvName, std::span<const VkDescriptorType> s, const char* entry) -> uint32_t
+    {
+        const auto p = shaderDir / spvName;
+        return std::filesystem::exists(p) ? Encoder_.RegisterProgram(p, s, entry) : 0u;
+    };
+    ProgCollision_      = tryReg("ParticleCollisionCompute.comp.spv",      collSlots, "ComputeEntry");
+    ProgHashClear_      = tryReg("ParticleSpatialHashClear.comp.spv",      hashSlots, "ClearBucketsComputeEntry");
+    ProgHashCount_      = tryReg("ParticleSpatialHashCount.comp.spv",      hashSlots, "CountCellsComputeEntry");
+    ProgHashScanLocal_  = tryReg("ParticleSpatialHashScanLocal.comp.spv",  hashSlots, "PrefixSumLocalComputeEntry");
+    ProgHashScanBlocks_ = tryReg("ParticleSpatialHashScanBlocks.comp.spv", hashSlots, "PrefixSumBlocksComputeEntry");
+    ProgHashScanAdd_    = tryReg("ParticleSpatialHashScanAdd.comp.spv",    hashSlots, "PrefixSumAddBlocksComputeEntry");
+    ProgHashScatter_    = tryReg("ParticleSpatialHashScatter.comp.spv",    hashSlots, "ScatterIndicesComputeEntry");
+    ProgHashResolve_    = tryReg("ParticleSpatialHashResolve.comp.spv",    hashSlots, "ResolveNeighborsComputeEntry");
+    ProgXpbdPredict_    = tryReg("ParticleXpbdPredictInertia.comp.spv",    xpbdSlots, "PredictInertiaComputeEntry");
+    ProgXpbdResetDual_  = tryReg("ParticleXpbdResetDuals.comp.spv",        xpbdSlots, "ResetDualsComputeEntry");
+    ProgXpbdDistance_   = tryReg("ParticleXpbdSolveDistance.comp.spv",     xpbdSlots, "SolveDistanceBatchComputeEntry");
+    ProgXpbdSeam_       = tryReg("ParticleXpbdSolveSeam.comp.spv",         xpbdSlots, "SolveSeamBatchComputeEntry");
+    ProgXpbdFace_       = tryReg("ParticleXpbdSolveFace.comp.spv",         xpbdSlots, "SolveFaceBatchComputeEntry");
+    ProgXpbdHinge_      = tryReg("ParticleXpbdSolveHinge.comp.spv",        xpbdSlots, "SolveHingeBatchComputeEntry");
+    ProgXpbdFinalize_   = tryReg("ParticleXpbdFinalizeSubstep.comp.spv",   xpbdSlots, "FinalizeSubstepComputeEntry");
+
+    Telemetry_.CollisionPipelineReady   = (ProgCollision_ != 0u);
+    Telemetry_.SpatialHashPipelineReady = (ProgHashClear_ != 0u && ProgHashCount_ != 0u && ProgHashScanLocal_ != 0u &&
+                                           ProgHashScanBlocks_ != 0u && ProgHashScanAdd_ != 0u &&
+                                           ProgHashScatter_ != 0u && ProgHashResolve_ != 0u);
+    Telemetry_.XpbdPipelineReady        = (ProgXpbdPredict_ != 0u && ProgXpbdDistance_ != 0u && ProgXpbdFinalize_ != 0u);
+
     VkSamplerCreateInfo samplerCi {};
     samplerCi.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerCi.magFilter    = VK_FILTER_LINEAR;
@@ -1541,21 +1615,35 @@ bool ParticleVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::pa
         return false;
     }
 
-    const uint64_t stateBytes = static_cast<uint64_t>(MaxParticleCapacity_) * sizeof(ParticleStateGpuRecord);
+    const uint64_t stateBytes  = static_cast<uint64_t>(MaxParticleCapacity_) * sizeof(ParticleStateGpuRecord);
+    const uint64_t bucketBytes = static_cast<uint64_t>(kSpatialHashBuckets) * sizeof(uint32_t);
+    const uint64_t pIdxBytes   = static_cast<uint64_t>(MaxParticleCapacity_) * sizeof(uint32_t);
     BufStates_[0]    = Encoder_.AllocateDeviceLocalBuffer(stateBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     BufStates_[1]    = Encoder_.AllocateDeviceLocalBuffer(stateBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     BufPrevPos_      = Encoder_.AllocateDeviceLocalBuffer(static_cast<uint64_t>(MaxParticleCapacity_) * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     BufAnchors_      = Encoder_.AllocateHostWritableBuffer(static_cast<uint64_t>(MaxParticleCapacity_) * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     BufForces_       = Encoder_.AllocateHostWritableBuffer(64ull * sizeof(SimulationSpace::ForceFields::ForceModelGpuRecord), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufRigidProxies_ = Encoder_.AllocateHostWritableBuffer(static_cast<uint64_t>(kMaxRigidProxies) * 80ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufProxyOmega_   = Encoder_.AllocateHostWritableBuffer(static_cast<uint64_t>(kMaxRigidProxies) * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHullHeaders_  = Encoder_.AllocateHostWritableBuffer(16ull * 64ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHullVoxels_   = Encoder_.AllocateDeviceLocalBuffer(256ull * sizeof(float), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     BufImpulseAtomic_= Encoder_.AllocateDeviceLocalBuffer(
         static_cast<uint64_t>(kMaxImpulseEntries) * sizeof(ParticleRigidImpulseEntry),
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    BufHashCounts_   = Encoder_.AllocateDeviceLocalBuffer(bucketBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHashOffsets_  = Encoder_.AllocateDeviceLocalBuffer(bucketBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHashBlockSums_= Encoder_.AllocateDeviceLocalBuffer(256ull * sizeof(uint32_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHashWriteOffs_= Encoder_.AllocateDeviceLocalBuffer(bucketBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHashBuckets_  = Encoder_.AllocateDeviceLocalBuffer(pIdxBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufHashSortedIdx_= Encoder_.AllocateDeviceLocalBuffer(pIdxBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     ImgFallbackGas_  = Interchange_->AllocateImage3D(
         4u, 4u, 4u, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 
     for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
     {
-        BufUpdateUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(ParticleUpdateUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufUpdateUbo_[s]    = Encoder_.AllocateHostWritableBuffer(sizeof(ParticleUpdateUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufCollisionUbo_[s] = Encoder_.AllocateHostWritableBuffer(64ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufHashUbo_[s]      = Encoder_.AllocateHostWritableBuffer(64ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     }
 
     if (BufStates_[0].BufferHandle == VK_NULL_HANDLE || BufStates_[1].BufferHandle == VK_NULL_HANDLE ||
@@ -1566,8 +1654,9 @@ bool ParticleVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::pa
     }
 
     Telemetry_.AllocatedSsboBytes = stateBytes * 2ull + BufPrevPos_.ByteCapacity + BufAnchors_.ByteCapacity +
-                                    BufForces_.ByteCapacity + BufImpulseAtomic_.ByteCapacity +
-                                    sizeof(ParticleUpdateUniformBlock) * kTripleBufferSlots;
+                                    BufForces_.ByteCapacity + BufRigidProxies_.ByteCapacity + BufImpulseAtomic_.ByteCapacity +
+                                    bucketBytes * 3ull + pIdxBytes * 2ull +
+                                    (sizeof(ParticleUpdateUniformBlock) + 128ull) * kTripleBufferSlots;
     return true;
 }
 
@@ -1589,8 +1678,14 @@ void ParticleVulkanGpuExecutor::ReleaseGpuResources() noexcept
             if (b.BufferHandle != VK_NULL_HANDLE) Interchange_->ReleaseBuffer(b);
         };
         relBuf(BufStates_[0]); relBuf(BufStates_[1]); relBuf(BufPrevPos_);
-        relBuf(BufAnchors_); relBuf(BufForces_); relBuf(BufImpulseAtomic_);
+        relBuf(BufAnchors_); relBuf(BufForces_); relBuf(BufRigidProxies_);
+        relBuf(BufProxyOmega_); relBuf(BufHullHeaders_); relBuf(BufHullVoxels_);
+        relBuf(BufImpulseAtomic_);
+        relBuf(BufHashCounts_); relBuf(BufHashOffsets_); relBuf(BufHashBlockSums_);
+        relBuf(BufHashWriteOffs_); relBuf(BufHashBuckets_); relBuf(BufHashSortedIdx_);
         for (auto& u : BufUpdateUbo_) relBuf(u);
+        for (auto& u : BufCollisionUbo_) relBuf(u);
+        for (auto& u : BufHashUbo_) relBuf(u);
         if (ImgFallbackGas_.ImageHandle != VK_NULL_HANDLE) Interchange_->ReleaseImage2D(ImgFallbackGas_);
         if (LinearSampler_ != VK_NULL_HANDLE)
         {
@@ -1599,7 +1694,12 @@ void ParticleVulkanGpuExecutor::ReleaseGpuResources() noexcept
         }
     }
     Encoder_.TeardownEncoder();
-    ProgUpdate_ = ProgTrail_ = 0u;
+    ProgUpdate_ = ProgTrail_ = ProgCollision_ = 0u;
+    ProgHashClear_ = ProgHashCount_ = ProgHashScanLocal_ = ProgHashScanBlocks_ = ProgHashScanAdd_ = ProgHashScatter_ = ProgHashResolve_ = 0u;
+    ProgXpbdPredict_ = ProgXpbdResetDual_ = ProgXpbdDistance_ = ProgXpbdSeam_ = ProgXpbdFace_ = ProgXpbdHinge_ = ProgXpbdFinalize_ = 0u;
+    Telemetry_.CollisionPipelineReady   = false;
+    Telemetry_.SpatialHashPipelineReady = false;
+    Telemetry_.XpbdPipelineReady        = false;
     GpuLiveReady_ = false;
 }
 
@@ -1608,7 +1708,10 @@ void ParticleVulkanGpuExecutor::DispatchGpuAsync(
     const ParticleSimulationRegion& region,
     float simulationTimeSeconds,
     float deltaTimeSeconds,
-    std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords) noexcept
+    std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+    const void* rigidProxyBytes,
+    uint32_t rigidProxyCount,
+    uint32_t rigidProxyStrideBytes) noexcept
 {
     using namespace GeometricRaster;
     RetireCompletedCommandBuffersNonBlocking();
@@ -1618,6 +1721,14 @@ void ParticleVulkanGpuExecutor::DispatchGpuAsync(
     {
         const size_t n = std::min<size_t>(forceRecords.size(), 64u);
         std::memcpy(BufForces_.HostAddress, forceRecords.data(), n * sizeof(SimulationSpace::ForceFields::ForceModelGpuRecord));
+    }
+
+    const uint32_t uploadedProxies = (rigidProxyBytes != nullptr && rigidProxyStrideBytes == 80u)
+        ? std::min(rigidProxyCount, kMaxRigidProxies)
+        : 0u;
+    if (uploadedProxies > 0u && BufRigidProxies_.HostAddress != nullptr)
+    {
+        std::memcpy(BufRigidProxies_.HostAddress, rigidProxyBytes, static_cast<size_t>(uploadedProxies) * 80u);
     }
 
     const auto& primaryCloud = clouds[0];
@@ -1633,6 +1744,21 @@ void ParticleVulkanGpuExecutor::DispatchGpuAsync(
 
     VkCommandBuffer cmd = Interchange_->BeginSingleTimeCommands();
     if (cmd == VK_NULL_HANDLE) return;
+
+    auto emitBarrier = [&]()
+    {
+        VkMemoryBarrier2 barrier {};
+        barrier.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2;
+        barrier.srcStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+        barrier.srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT;
+        barrier.dstStageMask  = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        barrier.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT;
+        VkDependencyInfo dep {};
+        dep.sType              = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        dep.memoryBarrierCount = 1u;
+        dep.pMemoryBarriers    = &barrier;
+        vkCmdPipelineBarrier2(cmd, &dep);
+    };
 
     const uint32_t readIdx  = ActivePong_;
     const uint32_t writeIdx = 1u - ActivePong_;
@@ -1653,7 +1779,101 @@ void ParticleVulkanGpuExecutor::DispatchGpuAsync(
         Telemetry_.TotalDispatches += 1ull;
     }
 
-    ActivePong_ = writeIdx;
+    uint32_t liveStateIdx = writeIdx;
+
+    // Layer 221A: GPU Particle <-> Jolt RigidColliderProxy two-way collision + atomic impulse accumulation
+    if (AdditiveConfig_.EnableRigidCollisions && ProgCollision_ != 0u && uploadedProxies > 0u)
+    {
+        emitBarrier();
+        struct CollisionUboPod
+        {
+            uint32_t ParticleCount;
+            uint32_t ProxyCount;
+            uint32_t HullCount;
+            uint32_t Flags;
+            float    DeltaTime;
+            float    ParticleRadius;
+            float    Restitution;
+            float    Friction;
+            float    Pad[8];
+        } colUbo { cap, uploadedProxies, 0u, 1u, deltaTimeSeconds,
+                   AdditiveConfig_.ParticleRadiusMeters, AdditiveConfig_.Restitution, AdditiveConfig_.Friction, {} };
+        if (BufCollisionUbo_[slot].HostAddress != nullptr)
+        {
+            std::memcpy(BufCollisionUbo_[slot].HostAddress, &colUbo, 64u);
+        }
+        const std::array<ComputeSlotDescriptor, 7> colSlots {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufCollisionUbo_[slot].BufferHandle, 64u },
+            { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufStates_[liveStateIdx].BufferHandle, VK_WHOLE_SIZE },
+            { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufRigidProxies_.BufferHandle,         VK_WHOLE_SIZE },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufProxyOmega_.BufferHandle,           VK_WHOLE_SIZE },
+            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHullHeaders_.BufferHandle,          VK_WHOLE_SIZE },
+            { 5u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHullVoxels_.BufferHandle,           VK_WHOLE_SIZE },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufImpulseAtomic_.BufferHandle,        VK_WHOLE_SIZE }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgCollision_, colSlots, groupsX))
+        {
+            Telemetry_.TotalDispatches           += 1ull;
+            Telemetry_.AdditivePhysicsDispatches += 1ull;
+        }
+    }
+
+    // Layer 221B: 7-stage Blelloch Spatial-Hash GPU Self-Collision
+    if (AdditiveConfig_.EnableSpatialHashSelfCollision && Telemetry_.SpatialHashPipelineReady)
+    {
+        emitBarrier();
+        const uint32_t nextIdx = 1u - liveStateIdx;
+        struct HashUboPod
+        {
+            uint32_t ParticleCount;
+            uint32_t BucketCount;
+            float    CellSize;
+            float    ParticleRadius;
+            float    Restitution;
+            float    Friction;
+            float    DeltaTime;
+            float    Pad[9];
+        } hUbo { cap, kSpatialHashBuckets, std::max(0.05f, AdditiveConfig_.ParticleRadiusMeters * 2.5f),
+                 AdditiveConfig_.ParticleRadiusMeters, AdditiveConfig_.Restitution, AdditiveConfig_.Friction,
+                 deltaTimeSeconds, {} };
+        if (BufHashUbo_[slot].HostAddress != nullptr)
+        {
+            std::memcpy(BufHashUbo_[slot].HostAddress, &hUbo, 64u);
+        }
+        const std::array<ComputeSlotDescriptor, 9> hSlots {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufHashUbo_[slot].BufferHandle,      64u },
+            { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufStates_[liveStateIdx].BufferHandle, VK_WHOLE_SIZE },
+            { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufStates_[nextIdx].BufferHandle,      VK_WHOLE_SIZE },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHashCounts_.BufferHandle,           VK_WHOLE_SIZE },
+            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHashOffsets_.BufferHandle,          VK_WHOLE_SIZE },
+            { 5u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHashBlockSums_.BufferHandle,        VK_WHOLE_SIZE },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHashWriteOffs_.BufferHandle,        VK_WHOLE_SIZE },
+            { 7u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHashBuckets_.BufferHandle,          VK_WHOLE_SIZE },
+            { 8u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufHashSortedIdx_.BufferHandle,        VK_WHOLE_SIZE }
+        }};
+        const uint32_t bucketGroups = (kSpatialHashBuckets + 63u) / 64u;
+        const uint32_t scanGroups   = (kSpatialHashBuckets + 255u) / 256u;
+        auto runHash = [&](uint32_t prog, uint32_t gx)
+        {
+            if (Encoder_.EncodeComputeDispatch(cmd, prog, hSlots, gx))
+            {
+                Telemetry_.TotalDispatches           += 1ull;
+                Telemetry_.AdditivePhysicsDispatches += 1ull;
+            }
+            emitBarrier();
+        };
+        runHash(ProgHashClear_,      bucketGroups);
+        runHash(ProgHashCount_,      groupsX);
+        runHash(ProgHashScanLocal_,  scanGroups);
+        runHash(ProgHashScanBlocks_, 1u);
+        runHash(ProgHashScanAdd_,    scanGroups);
+        runHash(ProgHashScatter_,    groupsX);
+        runHash(ProgHashResolve_,    groupsX);
+        liveStateIdx = nextIdx;
+    }
+
+    ActivePong_ = liveStateIdx;
+    emitBarrier();
     const bool encodedReadback = ImpulseReadbackRing_.EncodeAsyncCopy(cmd, BufImpulseAtomic_.BufferHandle, kMaxImpulseEntries);
     const uint64_t submittedSignal = Interchange_->DispatchCommandBufferAsync(cmd);
     Telemetry_.LastSubmittedTimeline = submittedSignal;

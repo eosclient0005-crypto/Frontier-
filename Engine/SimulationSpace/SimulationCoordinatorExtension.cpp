@@ -166,7 +166,10 @@ void SimulationCoordinatorExtension::Tick(double deltaSeconds) noexcept
                     simT,
                     dtF,
                     activeForces,
-                    gasView);
+                    gasView,
+                    RigidProxies_.empty() ? nullptr : RigidProxies_.data(),
+                    static_cast<uint32_t>(RigidProxies_.size()),
+                    static_cast<uint32_t>(sizeof(PhysicsSpace::RigidColliderProxy)));
 
                 Telemetry_.ActiveParticleCount = ParticleGpuExecutor_.InspectTelemetry().RealGpuDispatched
                     ? ParticleClouds_[0].Evaluated.Count

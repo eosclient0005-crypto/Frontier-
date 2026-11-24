@@ -1406,6 +1406,26 @@ bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path&
     ProgPressure_   = Encoder_.RegisterProgram(spvPress,  divPressSlots, "PressureComputeEntry");
     ProgGradient_   = Encoder_.RegisterProgram(spvGrad,   gradSlots,   "GradientComputeEntry");
 
+    const std::array<VkDescriptorType, 7> macSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_SAMPLER
+    };
+    const std::array<VkDescriptorType, 10> tracerDebrisSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_SAMPLER,        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    };
+    const auto spvMac    = shaderDir / "FluidMacCormackCompute.comp.spv";
+    const auto spvTracer = shaderDir / "FluidTracerUpdateCompute.comp.spv";
+    const auto spvDebris = shaderDir / "FluidDebrisUpdateCompute.comp.spv";
+    ProgMacCormack_   = std::filesystem::exists(spvMac)    ? Encoder_.RegisterProgram(spvMac,    macSlots,          "ComputeEntry")             : 0u;
+    ProgTracerUpdate_ = std::filesystem::exists(spvTracer) ? Encoder_.RegisterProgram(spvTracer, tracerDebrisSlots, "TracerUpdateComputeEntry") : 0u;
+    ProgDebrisUpdate_ = std::filesystem::exists(spvDebris) ? Encoder_.RegisterProgram(spvDebris, tracerDebrisSlots, "DebrisUpdateComputeEntry") : 0u;
+    Telemetry_.MacCormackPipelineReady = (ProgMacCormack_ != 0u);
+    Telemetry_.TracerDebrisReady       = (ProgTracerUpdate_ != 0u && ProgDebrisUpdate_ != 0u);
+
     if (ProgInject_ == 0u || ProgAdvect_ == 0u || ProgGradient_ == 0u)
     {
         ReleaseGpuResources();
@@ -1453,6 +1473,8 @@ bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path&
     BufOccupancy_    = Encoder_.AllocateDeviceLocalBuffer(
         static_cast<uint64_t>(kMaxOccupancyFloat4s) * 16ull,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    BufTracers_[0]   = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufTracers_[1]   = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
     for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
     {
@@ -1500,6 +1522,8 @@ void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
         };
         relBuf(BufForceRecords_);
         relBuf(BufOccupancy_);
+        relBuf(BufTracers_[0]);
+        relBuf(BufTracers_[1]);
         for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
         {
             relBuf(BufInjectUbo_[s]); relBuf(BufAdvectUbo_[s]); relBuf(BufThermoUbo_[s]); relBuf(BufForcesUbo_[s]);
@@ -1707,5 +1731,26 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
     InFlightCommands_[slot].TimelineSignal = submittedSignal;
 }
 #endif
+
+FluidGpuVolumeFeedHandle FluidVulkanGpuExecutor::InspectVolumeGpuFeed() const noexcept
+{
+    FluidGpuVolumeFeedHandle feed {};
+    feed.Route                 = Telemetry_.Route;
+    feed.GridCells             = GridCells_;
+    feed.CentreMeters          = CentreMeters_;
+    feed.CellSizeMeters        = CellSizeMeters_;
+    feed.LastSubmittedTimeline = Telemetry_.LastSubmittedTimeline;
+    feed.GpuResident           = GpuLiveReady_ && Telemetry_.RealGpuDispatched;
+#if FRONTIER_FLUID_HAS_VULKAN
+    if (GpuLiveReady_)
+    {
+        feed.VelocityViewHandle = reinterpret_cast<uint64_t>(ImgVelocity_[ActivePong_].ViewHandle);
+        feed.StateViewHandle    = reinterpret_cast<uint64_t>(ImgState_[ActivePong_].ViewHandle);
+        feed.PressureViewHandle = reinterpret_cast<uint64_t>(ImgPressure_[0].ViewHandle);
+        feed.TracerBufferHandle = reinterpret_cast<uint64_t>(BufTracers_[ActivePong_].BufferHandle);
+    }
+#endif
+    return feed;
+}
 
 } // namespace Frontier::SimulationSpace::Fluid

@@ -60,6 +60,21 @@ struct DeformableExecutorTelemetry
     bool                     RealGpuDispatched      = false;
 };
 
+/// Read-only GPU buffer/image handle snapshot consumed by SimulationGpuRenderFeed with zero CPU readback.
+struct DeformableGpuRenderFeedHandle
+{
+    DeformableExecutionRoute Route                 = DeformableExecutionRoute::HeadlessCpuMirror;
+    uint32_t                 PointCount            = 0u;
+    uint32_t                 TetCount              = 0u;
+    uint64_t                 LastSubmittedTimeline = 0ull;
+    uint64_t                 PositionBufferHandle  = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    uint64_t                 CofactorBufferHandle  = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    uint64_t                 VatPosViewHandle      = 0ull; // VkImageView cast to uint64_t (0 when headless)
+    uint64_t                 VatNrmViewHandle      = 0ull; // VkImageView cast to uint64_t (0 when headless)
+    bool                     HasVatTexture         = false;
+    bool                     GpuResident           = false;
+};
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                 DEFORMABLE VULKAN EXECUTOR
 //------------------------------------------------------------------------------------------------------------------------
@@ -121,6 +136,7 @@ public:
 
     [[nodiscard]] bool Ready() const noexcept { return Initialized_; }
     [[nodiscard]] const DeformableExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
+    [[nodiscard]] DeformableGpuRenderFeedHandle      InspectRenderFeedHandle() const noexcept;
     [[nodiscard]] const DeformableGpuBufferPack& InspectActiveGpuPack() const noexcept
     {
         return RingPacks_[Telemetry_.ActiveRingSlot];

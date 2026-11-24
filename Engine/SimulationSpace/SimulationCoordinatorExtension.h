@@ -138,8 +138,10 @@ public:
     [[nodiscard]] Deformable::DeformableExtension&           AccessDeformables() noexcept { return Deformables_; }
     [[nodiscard]] const Deformable::DeformableExtension&     InspectDeformables() const noexcept { return Deformables_; }
 
-    [[nodiscard]] const Fluid::FluidVulkanGpuExecutor&         InspectFluidGpuExecutor() const noexcept { return FluidGpuExecutor_; }
-    [[nodiscard]] const ParticleSpace::ParticleVulkanGpuExecutor& InspectParticleGpuExecutor() const noexcept { return ParticleGpuExecutor_; }
+    [[nodiscard]] Fluid::FluidVulkanGpuExecutor&                   AccessFluidGpuExecutor() noexcept { return FluidGpuExecutor_; }
+    [[nodiscard]] const Fluid::FluidVulkanGpuExecutor&             InspectFluidGpuExecutor() const noexcept { return FluidGpuExecutor_; }
+    [[nodiscard]] ParticleSpace::ParticleVulkanGpuExecutor&        AccessParticleGpuExecutor() noexcept { return ParticleGpuExecutor_; }
+    [[nodiscard]] const ParticleSpace::ParticleVulkanGpuExecutor&  InspectParticleGpuExecutor() const noexcept { return ParticleGpuExecutor_; }
 
     [[nodiscard]] std::span<const PhysicsSpace::RigidImpulseAccumulatorEntry> InspectRigidImpulseFeedback() const noexcept
     {

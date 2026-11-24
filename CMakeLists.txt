@@ -945,6 +945,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometrySpace/Deformation/TetrahedralCageEmbedder.cpp
     Engine/GeometrySpace/Deformation/SurfaceQuadCageEmbedder.cpp
     Engine/GeometrySpace/Deformation/VertexMotionAtlasBaker.cpp
+    Engine/GeometrySpace/Deformation/VertexMotionAtlasGpuBaker.cpp
     Engine/GeometrySpace/Deformation/VertexMotionAtlasPlayer.cpp
     Engine/GeometrySpace/Deformation/VertexMotionAtlasExporter.cpp
     Engine/GeometrySpace/Deformation/PolygonNetworkDeformer.cpp
@@ -1181,6 +1182,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/ComponentSimulationPreviewDriver.cpp
     Engine/SimulationSpace/WorldSimulationSession.cpp
     Engine/SimulationSpace/DualLoopSimulationPools.cpp
+    Engine/SimulationSpace/SimulationGpuRenderFeed.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1495,6 +1497,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(ComponentSimulationPreviewValidation      Exhibits/ComponentSimulationPreviewValidation.cpp)
     frontier_register_exhibit(WorldSimulationSessionValidation          Exhibits/WorldSimulationSessionValidation.cpp)
     frontier_register_exhibit(GpuPipelineMergeReadinessValidation       Exhibits/GpuPipelineMergeReadinessValidation.cpp)
+    frontier_register_exhibit(SimulationGpuRenderFeedValidation         Exhibits/SimulationGpuRenderFeedValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)

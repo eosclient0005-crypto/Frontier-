@@ -15,6 +15,7 @@
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/SimulationSpace/ComponentClassSimulationAssembler.h"
 #include "Engine/SimulationSpace/ComponentSimulationPreviewDriver.h"
+#include "Engine/SimulationSpace/SimulationGpuRenderFeed.h"
 
 #include <array>
 #include <cstdint>
@@ -74,8 +75,11 @@ public:
     [[nodiscard]] bool             QueryPlaying() const noexcept { return RunStatus_ == PreviewRunStatus::Running; }
     [[nodiscard]] const PrefabAssemblyReport&    InspectAssemblyReport() const noexcept { return AssemblyReport_; }
     [[nodiscard]] const SimulationSceneDocument& InspectActiveScene() const noexcept { return ActiveScene_; }
-    [[nodiscard]] SimulationCoordinatorTelemetry InspectTelemetry() const noexcept;
+    [[nodiscard]] SimulationCoordinatorTelemetry  InspectTelemetry() const noexcept;
     [[nodiscard]] SimulationExecutionRouteSummary InspectExecutionRoutes() const noexcept;
+
+    /// Populates a fixed-capacity GPU render-feed packet in 0 heap allocations for direct World Renderer consumption.
+    void PopulateGpuRenderFeed(SimulationGpuRenderFeedPacket& outPacket) const noexcept;
 
     /// Extracts current deformed world-space triangle surfaces for all active SoftBody instances.
     [[nodiscard]] std::vector<PreviewSurfaceSnapshot> ExtractDeformableRenderSurfaces() const;

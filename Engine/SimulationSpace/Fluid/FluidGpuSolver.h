@@ -349,13 +349,30 @@ enum class FluidExecutionRoute : uint8_t
 
 struct FluidGpuExecutorTelemetry
 {
-    FluidExecutionRoute Route                  = FluidExecutionRoute::HeadlessCpuMirror;
-    uint32_t            ActiveRingSlot         = 0u;
-    uint64_t            CompletedTicks         = 0ull;
-    uint64_t            TotalDispatches        = 0ull;
-    uint64_t            LastSubmittedTimeline  = 0ull;
-    uint64_t            AllocatedImageBytes    = 0ull;
-    bool                RealGpuDispatched      = false;
+    FluidExecutionRoute Route                   = FluidExecutionRoute::HeadlessCpuMirror;
+    uint32_t            ActiveRingSlot          = 0u;
+    uint64_t            CompletedTicks          = 0ull;
+    uint64_t            TotalDispatches         = 0ull;
+    uint64_t            LastSubmittedTimeline   = 0ull;
+    uint64_t            AllocatedImageBytes     = 0ull;
+    bool                RealGpuDispatched       = false;
+    bool                MacCormackPipelineReady = false;
+    bool                TracerDebrisReady       = false;
+};
+
+/// Read-only 3D GPU volume feed consumed by SimulationGpuRenderFeed for zero-copy FluidVolumeRaymarch.slang.
+struct FluidGpuVolumeFeedHandle
+{
+    FluidExecutionRoute     Route                 = FluidExecutionRoute::HeadlessCpuMirror;
+    std::array<uint32_t, 3> GridCells             { 0u, 0u, 0u };
+    std::array<float, 3>    CentreMeters          { 0.0f, 0.0f, 0.0f };
+    float                   CellSizeMeters        = 0.22f;
+    uint64_t                LastSubmittedTimeline = 0ull;
+    uint64_t                VelocityViewHandle    = 0ull; // VkImageView cast to uint64_t (0 when headless)
+    uint64_t                StateViewHandle       = 0ull; // VkImageView cast to uint64_t (0 when headless)
+    uint64_t                PressureViewHandle    = 0ull; // VkImageView cast to uint64_t (0 when headless)
+    uint64_t                TracerBufferHandle    = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    bool                    GpuResident           = false;
 };
 
 /// Real Async Vulkan 1.2 3D Eulerian + Sparse Fluid GPU executor using VulkanInterchange::AllocateImage3D +
@@ -406,6 +423,10 @@ public:
 
     [[nodiscard]] bool Ready() const noexcept { return Initialized_; }
     [[nodiscard]] const FluidGpuExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
+    [[nodiscard]] FluidGpuVolumeFeedHandle         InspectVolumeGpuFeed() const noexcept;
+
+    void SetUseMacCormackAdvection(bool enabled) noexcept { UseMacCormack_ = enabled; }
+    [[nodiscard]] bool QueryUseMacCormackAdvection() const noexcept { return UseMacCormack_; }
 
 private:
     std::array<uint32_t, 3> GridCells_       { 16u, 16u, 16u };
@@ -415,6 +436,7 @@ private:
     FluidGpuExecutorTelemetry Telemetry_     {};
     AsyncGpuReadbackRing<std::array<float, 4>, kTripleBufferSlots> OccupancyReadbackRing_ {};
     std::vector<std::array<float, 4>> ScratchOccupancy_ {};
+    bool                    UseMacCormack_   = true;
     bool                    Initialized_     = false;
     bool                    GpuLiveReady_    = false;
 
@@ -450,6 +472,8 @@ private:
     uint32_t                                              ProgPressure_      = 0u;
     uint32_t                                              ProgGradient_      = 0u;
     uint32_t                                              ProgOccupancy_     = 0u;
+    uint32_t                                              ProgTracerUpdate_  = 0u;
+    uint32_t                                              ProgDebrisUpdate_  = 0u;
     std::array<GeometricRaster::DeviceImageResource, 2>   ImgVelocity_       {};
     std::array<GeometricRaster::DeviceImageResource, 2>   ImgState_          {};
     std::array<GeometricRaster::DeviceImageResource, 2>   ImgPressure_       {};
@@ -459,6 +483,7 @@ private:
     GeometricRaster::DeviceImageResource                  ImgScratchB_       {};
     GeometricRaster::DeviceBufferResource                 BufForceRecords_   {};
     GeometricRaster::DeviceBufferResource                 BufOccupancy_      {};
+    std::array<GeometricRaster::DeviceBufferResource, 2>  BufTracers_        {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufInjectUbo_   {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufAdvectUbo_   {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufThermoUbo_   {};

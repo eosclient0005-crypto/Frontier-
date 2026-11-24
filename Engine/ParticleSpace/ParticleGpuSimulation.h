@@ -285,13 +285,43 @@ enum class ParticleExecutionRoute : uint8_t
 
 struct ParticleGpuExecutorTelemetry
 {
+    ParticleExecutionRoute Route                     = ParticleExecutionRoute::HeadlessCpuMirror;
+    uint32_t               ActiveRingSlot            = 0u;
+    uint32_t               ActiveParticleCount       = 0u;
+    uint32_t               ActiveRigidColliderCount  = 0u;
+    uint64_t               CompletedTicks            = 0ull;
+    uint64_t               TotalDispatches           = 0ull;
+    uint64_t               AdditivePhysicsDispatches = 0ull;
+    uint64_t               LastSubmittedTimeline     = 0ull;
+    uint64_t               AllocatedSsboBytes        = 0ull;
+    bool                   RealGpuDispatched         = false;
+    bool                   CollisionPipelineReady    = false;
+    bool                   SpatialHashPipelineReady  = false;
+    bool                   XpbdPipelineReady         = false;
+};
+
+/// Optional additive GPU physics switches for Layer 220 (XPBD) & Layer 221 (Jolt + Spatial-Hash collisions).
+struct ParticleAdditiveGpuPhysicsConfig
+{
+    bool  EnableRigidCollisions          = false;
+    bool  EnableSpatialHashSelfCollision = false;
+    bool  EnableXpbdConstraints          = false;
+    float Restitution                    = 0.35f;
+    float Friction                       = 0.45f;
+    float ParticleRadiusMeters           = 0.04f;
+};
+
+/// Read-only GPU buffer feed snapshot consumed by SimulationGpuRenderFeed with zero CPU readback.
+struct ParticleGpuRenderFeedHandle
+{
     ParticleExecutionRoute Route                 = ParticleExecutionRoute::HeadlessCpuMirror;
-    uint32_t               ActiveRingSlot        = 0u;
-    uint64_t               CompletedTicks        = 0ull;
-    uint64_t               TotalDispatches       = 0ull;
+    uint32_t               ActiveParticleCount   = 0u;
+    uint32_t               MaxParticleCapacity   = 0u;
     uint64_t               LastSubmittedTimeline = 0ull;
-    uint64_t               AllocatedSsboBytes    = 0ull;
-    bool                   RealGpuDispatched     = false;
+    uint64_t               StateBufferHandle     = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    uint64_t               PrevPosBufferHandle   = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    uint64_t               ImpulseBufferHandle   = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    bool                   GpuResident           = false;
 };
 
 /// 64-byte ABI-identical mirror of RigidImpulseAccumulatorEntry for async Particle->Rigid impulse readback.
@@ -313,6 +343,8 @@ class ParticleVulkanGpuExecutor
 public:
     static constexpr uint32_t kTripleBufferSlots    = 3u;
     static constexpr uint32_t kMaxImpulseEntries    = 64u;
+    static constexpr uint32_t kMaxRigidProxies      = 64u;
+    static constexpr uint32_t kSpatialHashBuckets   = 4096u;
 
     ParticleVulkanGpuExecutor() = default;
     ~ParticleVulkanGpuExecutor();
@@ -330,8 +362,17 @@ public:
 
     void Teardown() noexcept;
 
+    void ConfigureAdditiveGpuPhysics(const ParticleAdditiveGpuPhysicsConfig& config) noexcept
+    {
+        AdditiveConfig_ = config;
+    }
+    [[nodiscard]] const ParticleAdditiveGpuPhysicsConfig& InspectAdditiveGpuPhysics() const noexcept
+    {
+        return AdditiveConfig_;
+    }
+
     /// Executes one particle tick: dispatches real Vulkan 1.2 compute shaders asynchronously when GPU-backed
-    /// (ZERO StepCloudsCpu call on live hardware GPU), or runs headless CPU fallback when unbacked.
+    /// (including Layer 221 rigid/spatial-hash collisions & Layer 220 XPBD when enabled), or headless fallback.
     void ExecuteStep(
         ParticleGpuSimulation& headlessFallbackSim,
         std::span<const ParticleCloudNode> clouds,
@@ -340,7 +381,10 @@ public:
         float simulationTimeSeconds,
         float deltaTimeSeconds,
         std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
-        GasVelocitySamplerView headlessGasSampler = {});
+        GasVelocitySamplerView headlessGasSampler = {},
+        const void* rigidProxyBytes = nullptr,
+        uint32_t rigidProxyCount = 0u,
+        uint32_t rigidProxyStrideBytes = 80u);
 
     /// Non-blocking poll of the 3-slot Particle->Rigid impulse readback ring (1-2 frames latency, zero stall).
     [[nodiscard]] bool PollAsyncImpulseReadback() noexcept;
@@ -349,16 +393,19 @@ public:
         return ImpulseReadbackRing_.InspectLatestCompleted();
     }
 
+    [[nodiscard]] ParticleGpuRenderFeedHandle InspectRenderFeedHandle() const noexcept;
+
     [[nodiscard]] bool Ready() const noexcept { return Initialized_; }
     [[nodiscard]] const ParticleGpuExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
 
 private:
-    uint32_t                     MaxParticleCapacity_ = 4096u;
-    uint32_t                     ActivePong_          = 0u;
-    ParticleGpuExecutorTelemetry Telemetry_           {};
+    uint32_t                         MaxParticleCapacity_ = 4096u;
+    uint32_t                         ActivePong_          = 0u;
+    ParticleAdditiveGpuPhysicsConfig AdditiveConfig_      {};
+    ParticleGpuExecutorTelemetry     Telemetry_           {};
     SimulationSpace::AsyncGpuReadbackRing<ParticleRigidImpulseEntry, kTripleBufferSlots> ImpulseReadbackRing_ {};
-    bool                         Initialized_         = false;
-    bool                         GpuLiveReady_        = false;
+    bool                             Initialized_         = false;
+    bool                             GpuLiveReady_        = false;
 
 #if FRONTIER_PARTICLE_HAS_VULKAN
     struct PendingCmd
@@ -375,20 +422,50 @@ private:
         const ParticleSimulationRegion& region,
         float simulationTimeSeconds,
         float deltaTimeSeconds,
-        std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords) noexcept;
+        std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+        const void* rigidProxyBytes,
+        uint32_t rigidProxyCount,
+        uint32_t rigidProxyStrideBytes) noexcept;
 
     GeometricRaster::VulkanInterchange*                   Interchange_       = nullptr;
     GeometricRaster::ComputeDispatchEncoder               Encoder_           {};
     VkSampler                                             LinearSampler_     = VK_NULL_HANDLE;
     uint32_t                                              ProgUpdate_        = 0u;
     uint32_t                                              ProgTrail_         = 0u;
+    uint32_t                                              ProgCollision_     = 0u;
+    uint32_t                                              ProgHashClear_     = 0u;
+    uint32_t                                              ProgHashCount_     = 0u;
+    uint32_t                                              ProgHashScanLocal_ = 0u;
+    uint32_t                                              ProgHashScanBlocks_= 0u;
+    uint32_t                                              ProgHashScanAdd_   = 0u;
+    uint32_t                                              ProgHashScatter_   = 0u;
+    uint32_t                                              ProgHashResolve_   = 0u;
+    uint32_t                                              ProgXpbdPredict_   = 0u;
+    uint32_t                                              ProgXpbdResetDual_ = 0u;
+    uint32_t                                              ProgXpbdDistance_  = 0u;
+    uint32_t                                              ProgXpbdSeam_      = 0u;
+    uint32_t                                              ProgXpbdFace_      = 0u;
+    uint32_t                                              ProgXpbdHinge_     = 0u;
+    uint32_t                                              ProgXpbdFinalize_  = 0u;
     std::array<GeometricRaster::DeviceBufferResource, 2>  BufStates_         {};
     GeometricRaster::DeviceBufferResource                 BufPrevPos_        {};
     GeometricRaster::DeviceBufferResource                 BufAnchors_        {};
     GeometricRaster::DeviceBufferResource                 BufForces_         {};
+    GeometricRaster::DeviceBufferResource                 BufRigidProxies_   {};
+    GeometricRaster::DeviceBufferResource                 BufProxyOmega_     {};
+    GeometricRaster::DeviceBufferResource                 BufHullHeaders_    {};
+    GeometricRaster::DeviceBufferResource                 BufHullVoxels_     {};
     GeometricRaster::DeviceBufferResource                 BufImpulseAtomic_  {};
+    GeometricRaster::DeviceBufferResource                 BufHashCounts_     {};
+    GeometricRaster::DeviceBufferResource                 BufHashOffsets_    {};
+    GeometricRaster::DeviceBufferResource                 BufHashBlockSums_  {};
+    GeometricRaster::DeviceBufferResource                 BufHashWriteOffs_  {};
+    GeometricRaster::DeviceBufferResource                 BufHashBuckets_    {};
+    GeometricRaster::DeviceBufferResource                 BufHashSortedIdx_  {};
     GeometricRaster::DeviceImageResource                  ImgFallbackGas_    {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufUpdateUbo_ {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufCollisionUbo_ {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufHashUbo_ {};
     std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
 #endif
 };

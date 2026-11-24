@@ -539,4 +539,25 @@ void DeformableVulkanExecutor::DispatchGpuAsync(const DeformableExternalCoupling
 }
 #endif
 
+DeformableGpuRenderFeedHandle DeformableVulkanExecutor::InspectRenderFeedHandle() const noexcept
+{
+    DeformableGpuRenderFeedHandle feed {};
+    feed.Route                 = Telemetry_.Route;
+    feed.PointCount            = static_cast<uint32_t>(RingPacks_[Telemetry_.ActiveRingSlot].PositionsInvMass.size());
+    feed.TetCount              = static_cast<uint32_t>(RingPacks_[Telemetry_.ActiveRingSlot].TetElements.size());
+    feed.LastSubmittedTimeline = Telemetry_.LastSubmittedTimeline;
+    feed.HasVatTexture         = HasVatImage_;
+    feed.GpuResident           = GpuLiveReady_ && Telemetry_.RealGpuDispatched;
+#if FRONTIER_DEFORMABLE_HAS_VULKAN
+    if (GpuLiveReady_)
+    {
+        feed.PositionBufferHandle = reinterpret_cast<uint64_t>(BufPositionsInvMass_.BufferHandle);
+        feed.CofactorBufferHandle = reinterpret_cast<uint64_t>(BufTetCofactors_.BufferHandle);
+        feed.VatPosViewHandle     = reinterpret_cast<uint64_t>(VatPosImage_.ViewHandle);
+        feed.VatNrmViewHandle     = reinterpret_cast<uint64_t>(VatNrmImage_.ViewHandle);
+    }
+#endif
+    return feed;
+}
+
 } // namespace Frontier::SimulationSpace::Deformable

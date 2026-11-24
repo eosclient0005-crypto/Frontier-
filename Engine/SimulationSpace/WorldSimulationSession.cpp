@@ -205,6 +205,16 @@ SimulationExecutionRouteSummary WorldSimulationSession::InspectExecutionRoutes()
     return Coordinator_->InspectExecutionRoutes();
 }
 
+void WorldSimulationSession::PopulateGpuRenderFeed(SimulationGpuRenderFeedPacket& outPacket) const noexcept
+{
+    if (!Coordinator_)
+    {
+        outPacket = {};
+        return;
+    }
+    PopulateSimulationGpuRenderFeed(*Coordinator_, outPacket);
+}
+
 std::vector<PreviewSurfaceSnapshot> WorldSimulationSession::ExtractDeformableRenderSurfaces() const
 {
     std::vector<PreviewSurfaceSnapshot> out;
