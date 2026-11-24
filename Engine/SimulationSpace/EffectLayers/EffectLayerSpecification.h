@@ -30,6 +30,8 @@ namespace Frontier::SimulationSpace::EffectLayers
 inline constexpr uint32_t kFluidRegionLayerCode  = 101u; // [-] - Required GasVolume layer (TOML token: "domain")
 inline constexpr uint32_t kReleaseSourceLayerCode = 102u; // [-] - Linked GasVolume source layer (TOML token: "source")
 inline constexpr uint32_t kParticleSpawnLayerCode = 201u; // [-] - Required ParticleCloud layer (TOML token: "spawn")
+inline constexpr uint32_t kParticleXpbdLayerCode       = 220u; // [-] - Opt-in Frontier GPU Orthotropic XPBD layer
+inline constexpr uint32_t kParticleGpuCollisionLayerCode = 221u; // [-] - Opt-in Frontier GPU Collisions layer
 inline constexpr uint32_t kDefaultMaximumLayers   = 32u;  // [-] - Stack capacity fallback
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -184,10 +186,11 @@ struct LayerCategorySpecification
 
 struct EffectLayerSpecificationSet
 {
-    uint32_t                                 Revision          = 1u;                    // [-] - Document.Revision
-    uint32_t                                 MaximumLayers     = kDefaultMaximumLayers; // [-] - Document.MaximumLayers
-    std::string                              SpecificationHash {};                      // [-] - 16-hex FNV-1a over canonical JSON
-    std::vector<LayerCategorySpecification>  Layers            {};                      // [-] - All layer category specs
+    uint32_t                                 Revision              = 1u;                    // [-] - Document.Revision
+    uint32_t                                 MaximumLayers         = kDefaultMaximumLayers; // [-] - Document.MaximumLayers
+    std::string                              SpecificationHash     {};                      // [-] - 16-hex FNV-1a over full canonical JSON
+    std::string                              CoreSpecificationHash {};                      // [-] - 16-hex FNV-1a over canonical 28 HTML layers (Code < 220)
+    std::vector<LayerCategorySpecification>  Layers                {};                      // [-] - All layer category specs
 
     [[nodiscard]] const LayerCategorySpecification* FindByCode(uint32_t categoryCode) const noexcept;
     [[nodiscard]] const LayerCategorySpecification* FindByToken(std::string_view token) const noexcept;

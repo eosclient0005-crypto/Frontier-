@@ -130,8 +130,8 @@ void ValidateEffectLayerSpecifications(const fs::path& root)
     CheckCondition(specsOpt.has_value(), "LayerSpecifications.VolumetricSpace loads cleanly");
     if (!specsOpt.has_value()) return;
 
-    CheckCondition(specsOpt->SpecificationHash == "885cc8c5a43d9053", "SpecificationHash matches golden FNV-1a digest 885cc8c5a43d9053");
-    CheckCondition(specsOpt->Layers.size() == 28u, "LayerSpecifications defines exactly 28 layers (9 gas + 19 particle)");
+    CheckCondition(specsOpt->CoreSpecificationHash == "885cc8c5a43d9053", "CoreSpecificationHash matches golden FNV-1a hash 885cc8c5a43d9053");
+    CheckCondition(specsOpt->Layers.size() == 30u, "LayerSpecifications defines 30 layers (28 canonical + 2 opt-in Frontier GPU physics layers 220/221)");
 
     uint32_t presetCount = 0u;
     uint32_t totalLoadedForces = 0u;

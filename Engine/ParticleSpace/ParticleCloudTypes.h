@@ -236,6 +236,15 @@ enum class ParticleTrailColourOrdinal : uint32_t
     Along    = 1u,
 };
 
+enum class ParticleXpbdTopologyOrdinal : uint8_t
+{
+    Off          = 0u,
+    ClothGrid    = 1u,
+    Spiderweb    = 2u,
+    CablesChains = 3u,
+    FloraBed     = 4u,
+};
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    SIZING HELPERS
 //------------------------------------------------------------------------------------------------------------------------
@@ -407,6 +416,30 @@ struct ParticleCloudParameters
     float                         Duration          = 0.0f;
     float                         Fade              = 0.15f;
     float                         Repeat            = 0.0f;
+
+    // Additive Layer 220: Frontier GPU Orthotropic XPBD (all neutral / off by default)
+    ParticleXpbdTopologyOrdinal   XpbdTopology      = ParticleXpbdTopologyOrdinal::Off;
+    uint32_t                      XpbdSubsteps      = 1u;
+    uint32_t                      XpbdIterations    = 1u;
+    float                         XpbdWarpModulus   = 0.0f;
+    float                         XpbdWeftModulus   = 0.0f;
+    float                         XpbdShearModulus  = 0.0f;
+    float                         XpbdBendStiffness = 0.0f;
+    float                         XpbdFriction      = 0.0f;
+    float                         XpbdBreakRatio    = 0.0f;
+    float                         XpbdAeroDrag      = 0.0f;
+
+    // Additive Layer 221: Frontier GPU Collisions (all neutral / off by default)
+    bool                          CollisionRigidCoupling  = false;
+    bool                          CollisionSelfHash       = false;
+    bool                          CollisionTwoWayImpulse  = false;
+    float                         CollisionParticleRadius = 0.0f;
+    float                         CollisionRestitution    = 0.0f;
+    float                         CollisionFriction       = 0.0f;
+    float                         CollisionCohesion       = 0.0f;
+    float                         CollisionPositionRelax  = 0.0f;
+    uint32_t                      CollisionSubsteps       = 1u;
+    uint32_t                      CollisionIterations     = 1u;
 };
 
 struct ParticleCloudNode
@@ -447,6 +480,7 @@ struct ParticleCloudNode
 [[nodiscard]] std::optional<ParticleStrandVariantOrdinal>  ParseParticleStrandVariantToken(std::string_view token) noexcept;
 [[nodiscard]] std::optional<ParticleTrailModeOrdinal>      ParseParticleTrailModeToken(std::string_view token) noexcept;
 [[nodiscard]] std::optional<ParticleTrailColourOrdinal>    ParseParticleTrailColourToken(std::string_view token) noexcept;
+[[nodiscard]] std::optional<ParticleXpbdTopologyOrdinal>   ParseParticleXpbdTopologyToken(std::string_view token) noexcept;
 
 [[nodiscard]] std::string_view QueryFireworkPatternToken(FireworkPatternOrdinal pattern) noexcept;
 [[nodiscard]] std::span<const std::string_view> QueryParticleCategoryNames() noexcept;

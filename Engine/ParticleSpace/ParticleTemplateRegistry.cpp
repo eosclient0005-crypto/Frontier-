@@ -57,6 +57,7 @@ constexpr std::array<std::string_view, 12u> kStrandTokens {{
 constexpr std::array<std::string_view, 2u> kStrandVariantTokens {{ "Primary", "Secondary" }};
 constexpr std::array<std::string_view, 3u> kTrailModeTokens {{ "Off", "Ribbon", "Only" }};
 constexpr std::array<std::string_view, 2u> kTrailColourTokens {{ "Particle", "Along" }};
+constexpr std::array<std::string_view, 5u> kXpbdTopologyTokens {{ "Off", "ClothGrid", "Spiderweb", "CablesChains", "FloraBed" }};
 
 constexpr std::array<std::string_view, 8u> kParticleCategories {{
     "Transitions", "Mocap & MoGraph", "FX & Shields", "Cinematic", "Trails", "Emitters", "Cloners", "Environment"
@@ -87,6 +88,16 @@ template <typename EnumT, size_t N>
     if (v == nullptr) return fallback;
     if (const auto* i = std::get_if<int64_t>(v)) return static_cast<uint32_t>(std::max<int64_t>(0, *i));
     if (const auto* d = std::get_if<double>(v)) return static_cast<uint32_t>(std::max(0.0, std::round(*d)));
+    return fallback;
+}
+
+[[nodiscard]] bool ReadBoolField(const SimulationSpace::EffectLayers::EvaluatedParameterBlock& b, const std::string_view name, const bool fallback) noexcept
+{
+    const auto* v = b.Find(name);
+    if (v == nullptr) return fallback;
+    if (const auto* flag = std::get_if<bool>(v)) return *flag;
+    if (const auto* i = std::get_if<int64_t>(v)) return *i != 0;
+    if (const auto* d = std::get_if<double>(v)) return *d != 0.0;
     return fallback;
 }
 
@@ -144,6 +155,7 @@ std::optional<ParticleStrandOrdinal>         ParseParticleStrandToken(const std:
 std::optional<ParticleStrandVariantOrdinal>  ParseParticleStrandVariantToken(const std::string_view t) noexcept  { return LookupTokenOrdinal<ParticleStrandVariantOrdinal>(kStrandVariantTokens, t); }
 std::optional<ParticleTrailModeOrdinal>      ParseParticleTrailModeToken(const std::string_view t) noexcept      { return LookupTokenOrdinal<ParticleTrailModeOrdinal>(kTrailModeTokens, t); }
 std::optional<ParticleTrailColourOrdinal>    ParseParticleTrailColourToken(const std::string_view t) noexcept    { return LookupTokenOrdinal<ParticleTrailColourOrdinal>(kTrailColourTokens, t); }
+std::optional<ParticleXpbdTopologyOrdinal>   ParseParticleXpbdTopologyToken(const std::string_view t) noexcept   { return LookupTokenOrdinal<ParticleXpbdTopologyOrdinal>(kXpbdTopologyTokens, t); }
 
 std::string_view QueryFireworkPatternToken(const FireworkPatternOrdinal pattern) noexcept
 {
@@ -295,6 +307,30 @@ void ApplyParticleEvaluationToParameters(
     p.StrandSway      = ReadFloatField(b, "StrandSway", p.StrandSway);
     p.StrandSpan      = ReadFloatField(b, "StrandSpan", p.StrandSpan);
     p.StrandGlow      = ReadFloatField(b, "StrandGlow", p.StrandGlow);
+
+    // Additive Layer 220 (XPBD Constraints) — neutral/off when layer absent
+    if (auto v = ParseParticleXpbdTopologyToken(ReadStringField(b, "XpbdTopology", "Off"))) p.XpbdTopology = *v;
+    p.XpbdSubsteps      = ReadUIntField(b, "XpbdSubsteps", p.XpbdSubsteps);
+    p.XpbdIterations    = ReadUIntField(b, "XpbdIterations", p.XpbdIterations);
+    p.XpbdWarpModulus   = ReadFloatField(b, "XpbdWarpModulus", p.XpbdWarpModulus);
+    p.XpbdWeftModulus   = ReadFloatField(b, "XpbdWeftModulus", p.XpbdWeftModulus);
+    p.XpbdShearModulus  = ReadFloatField(b, "XpbdShearModulus", p.XpbdShearModulus);
+    p.XpbdBendStiffness = ReadFloatField(b, "XpbdBendStiffness", p.XpbdBendStiffness);
+    p.XpbdFriction      = ReadFloatField(b, "XpbdFriction", p.XpbdFriction);
+    p.XpbdBreakRatio    = ReadFloatField(b, "XpbdBreakRatio", p.XpbdBreakRatio);
+    p.XpbdAeroDrag      = ReadFloatField(b, "XpbdAeroDrag", p.XpbdAeroDrag);
+
+    // Additive Layer 221 (GPU Collisions) — neutral/off when layer absent
+    p.CollisionRigidCoupling  = ReadBoolField(b, "CollisionRigidCoupling", p.CollisionRigidCoupling);
+    p.CollisionSelfHash       = ReadBoolField(b, "CollisionSelfHash", p.CollisionSelfHash);
+    p.CollisionTwoWayImpulse  = ReadBoolField(b, "CollisionTwoWayImpulse", p.CollisionTwoWayImpulse);
+    p.CollisionParticleRadius = ReadFloatField(b, "CollisionParticleRadius", p.CollisionParticleRadius);
+    p.CollisionRestitution    = ReadFloatField(b, "CollisionRestitution", p.CollisionRestitution);
+    p.CollisionFriction       = ReadFloatField(b, "CollisionFriction", p.CollisionFriction);
+    p.CollisionCohesion       = ReadFloatField(b, "CollisionCohesion", p.CollisionCohesion);
+    p.CollisionPositionRelax  = ReadFloatField(b, "CollisionPositionRelax", p.CollisionPositionRelax);
+    p.CollisionSubsteps       = ReadUIntField(b, "CollisionSubsteps", p.CollisionSubsteps);
+    p.CollisionIterations     = ReadUIntField(b, "CollisionIterations", p.CollisionIterations);
 }
 
 SimulationSpace::EffectLayers::StackEvaluationOutput EvaluateParticleCloudNode(

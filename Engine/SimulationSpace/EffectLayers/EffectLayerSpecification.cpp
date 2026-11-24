@@ -938,6 +938,33 @@ std::optional<EffectLayerSpecificationSet> LoadLayerSpecificationsFromToml(const
     EffectLayerSpecificationSet specSet {};
     specSet.SpecificationHash = ComputeFnv1a64Hex(FormatCanonicalJson(TomlValue { *parsed }));
 
+    // Compute CoreSpecificationHash strictly over canonical 1:1 HTML layers (Code < 220) without mutating parsed->Find("Layer")
+    {
+        TomlTable coreTable {};
+        for (const auto& field : parsed->Fields)
+        {
+            if (field.Key == "Layer" && field.Value != nullptr && field.Value->IsArray())
+            {
+                TomlArray filtered {};
+                for (const auto& entry : field.Value->AsArray()->Entries)
+                {
+                    const TomlTable* tbl = entry ? entry->AsTable() : nullptr;
+                    const int64_t code = (tbl != nullptr && tbl->Find("Code") != nullptr) ? tbl->Find("Code")->AsInt64(0) : 0;
+                    if (code < static_cast<int64_t>(kParticleXpbdLayerCode))
+                    {
+                        filtered.Entries.push_back(entry);
+                    }
+                }
+                coreTable.Set("Layer", TomlValue { std::move(filtered) });
+            }
+            else
+            {
+                coreTable.Fields.push_back(field);
+            }
+        }
+        specSet.CoreSpecificationHash = ComputeFnv1a64Hex(FormatCanonicalJson(TomlValue { coreTable }));
+    }
+
     if (const TomlValue* docVal = parsed->Find("Document"); docVal != nullptr && docVal->IsTable())
     {
         const TomlTable& doc = *docVal->AsTable();

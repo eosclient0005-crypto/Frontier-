@@ -2272,3 +2272,292 @@ Summary = "Fluid-coupled GPU strands, catenary cables, hanging vines, flexing fl
   Keyable = true
   Target = "Particles"
 
+[[Layer]]
+Code = 220
+Token = "xpbd-constraints"
+Name = "XPBD Constraints"
+Stack = "ParticleCloud"
+Phase = "Advance"
+Required = false
+Capacity = 1
+Summary = "Opt-in Frontier native zero-atomic conflict-colored GPU Orthotropic XPBD cloth, web, cable, and flora constraints with persistent dual multipliers."
+
+  [[Layer.Parameter]]
+  Code = 1
+  Name = "XpbdTopology"
+  Label = "Constraint topology"
+  Type = "Choice"
+  Default = 1
+  Neutral = 0
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+  Options = [ { Code = 0, Token = "Off", Label = "Off" }, { Code = 1, Token = "ClothGrid", Label = "Orthotropic cloth sheet" }, { Code = 2, Token = "Spiderweb", Label = "Radial spiderweb" }, { Code = 3, Token = "CablesChains", Label = "Catenary cables" }, { Code = 4, Token = "FloraBed", Label = "Flexing flora bed" } ]
+
+  [[Layer.Parameter]]
+  Code = 2
+  Name = "XpbdSubsteps"
+  Label = "Substeps per frame"
+  Type = "UInt32"
+  Minimum = 1
+  Maximum = 16
+  Default = 4
+  Neutral = 1
+  Step = 1
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 3
+  Name = "XpbdIterations"
+  Label = "Gauss-Seidel iterations"
+  Type = "UInt32"
+  Minimum = 1
+  Maximum = 48
+  Default = 16
+  Neutral = 1
+  Step = 1
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 4
+  Name = "XpbdWarpModulus"
+  Label = "Warp modulus"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 20000.0
+  Default = 1600.0
+  Neutral = 0.0
+  Step = 25.0
+  Unit = "N/m"
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 5
+  Name = "XpbdWeftModulus"
+  Label = "Weft modulus"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 20000.0
+  Default = 1600.0
+  Neutral = 0.0
+  Step = 25.0
+  Unit = "N/m"
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 6
+  Name = "XpbdShearModulus"
+  Label = "Shear modulus"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 5000.0
+  Default = 250.0
+  Neutral = 0.0
+  Step = 10.0
+  Unit = "N/m"
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 7
+  Name = "XpbdBendStiffness"
+  Label = "Quadratic hinge bending"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 5.0
+  Default = 0.12
+  Neutral = 0.0
+  Step = 0.02
+  Unit = ""
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 8
+  Name = "XpbdFriction"
+  Label = "Contact friction"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 1.5
+  Default = 0.45
+  Neutral = 0.0
+  Step = 0.02
+  Unit = ""
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 9
+  Name = "XpbdBreakRatio"
+  Label = "Strand tear ratio"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 4.0
+  Default = 0.0
+  Neutral = 0.0
+  Step = 0.05
+  Unit = "×"
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 10
+  Name = "XpbdAeroDrag"
+  Label = "Aerodynamic wind drag"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 4.0
+  Default = 0.35
+  Neutral = 0.0
+  Step = 0.05
+  Unit = ""
+  Keyable = true
+  Target = "Particles"
+
+[[Layer]]
+Code = 221
+Token = "gpu-collisions"
+Name = "GPU Collisions"
+Stack = "ParticleCloud"
+Phase = "Advance"
+Required = false
+Capacity = 1
+Summary = "Opt-in Frontier native GPU two-way Jolt rigid collider coupling and 3D spatial-hash particle self-collision solver."
+
+  [[Layer.Parameter]]
+  Code = 1
+  Name = "CollisionRigidCoupling"
+  Label = "Jolt rigid body colliders"
+  Type = "Bool"
+  Default = true
+  Neutral = false
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 2
+  Name = "CollisionSelfHash"
+  Label = "Spatial-hash self-collision"
+  Type = "Bool"
+  Default = true
+  Neutral = false
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 3
+  Name = "CollisionTwoWayImpulse"
+  Label = "Two-way rigid impulse feedback"
+  Type = "Bool"
+  Default = true
+  Neutral = false
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 4
+  Name = "CollisionParticleRadius"
+  Label = "Collision sphere radius"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 0.5
+  Default = 0.05
+  Neutral = 0.0
+  Step = 0.005
+  Unit = "m"
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 5
+  Name = "CollisionRestitution"
+  Label = "Bounce restitution"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 1.0
+  Default = 0.35
+  Neutral = 0.0
+  Step = 0.02
+  Unit = ""
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 6
+  Name = "CollisionFriction"
+  Label = "Coulomb surface friction"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 1.5
+  Default = 0.40
+  Neutral = 0.0
+  Step = 0.02
+  Unit = ""
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 7
+  Name = "CollisionCohesion"
+  Label = "Granular cohesion"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 5.0
+  Default = 0.0
+  Neutral = 0.0
+  Step = 0.05
+  Unit = ""
+  Keyable = true
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 8
+  Name = "CollisionPositionRelax"
+  Label = "Position relaxation"
+  Type = "Float32"
+  Minimum = 0.0
+  Maximum = 1.0
+  Default = 0.72
+  Neutral = 0.0
+  Step = 0.02
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 9
+  Name = "CollisionSubsteps"
+  Label = "Collision substeps"
+  Type = "UInt32"
+  Minimum = 1
+  Maximum = 12
+  Default = 4
+  Neutral = 1
+  Step = 1
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
+  [[Layer.Parameter]]
+  Code = 10
+  Name = "CollisionIterations"
+  Label = "Position solver iterations"
+  Type = "UInt32"
+  Minimum = 1
+  Maximum = 16
+  Default = 5
+  Neutral = 1
+  Step = 1
+  Unit = ""
+  Keyable = false
+  Target = "Particles"
+
