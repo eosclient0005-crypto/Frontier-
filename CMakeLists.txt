@@ -706,6 +706,45 @@ frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       Debris
 frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       GizmoLineVertexEntry       vertex   FluidGizmoLine.vert.spv)
 frontier_compile_fluid_slang_shader(FluidOverlayRasterization.slang       OverlayColourFragmentEntry fragment FluidOverlayColour.frag.spv)
 
+function(frontier_compile_deformable_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Deformable/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${IN_SLANG}"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders/Deformable"
+            -target spirv
+            -profile spirv_1_3
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceFieldNoise.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceModelEvaluation.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/Deformable/DeformableLayouts.slang"
+        COMMENT "[Slang] Compiling Deformable/${SLANG_REL_PATH} (${SHADER_UNIT}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_deformable_slang_shader(XpbdPredictIntegrate.slang         CsXpbdPredictIntegrate    compute  DeformableXpbdPredict.comp.spv)
+frontier_compile_deformable_slang_shader(XpbdDistanceBatch.slang            CsXpbdDistanceBatch       compute  DeformableXpbdDistance.comp.spv)
+frontier_compile_deformable_slang_shader(XpbdBendBatch.slang                CsXpbdBendBatch           compute  DeformableXpbdBend.comp.spv)
+frontier_compile_deformable_slang_shader(NeoHookeanTetBatch.slang           CsNeoHookeanTetBatch      compute  DeformableNeoHookeanTet.comp.spv)
+frontier_compile_deformable_slang_shader(DeformableContactUpdate.slang      CsDeformableContactUpdate compute  DeformableContactUpdate.comp.spv)
+frontier_compile_deformable_slang_shader(VertexMotionAtlasBakeCompute.slang CsVertexMotionAtlasBake   compute  DeformableVatBake.comp.spv)
+frontier_compile_deformable_slang_shader(CageSkinningVertex.slang           VsCageSkinning            vertex   DeformableCageSkinning.vert.spv)
+frontier_compile_deformable_slang_shader(VertexMotionAtlasSampling.slang    VsVertexMotionAtlas       vertex   DeformableVatSampling.vert.spv)
+frontier_compile_deformable_slang_shader(TireCarcassMaterial.slang          FsTireCarcassMaterial     fragment DeformableTireMaterial.frag.spv)
+
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
     set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
@@ -1137,6 +1176,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/Deformable/VehicleReadingConverter.cpp
     Engine/SimulationSpace/Deformable/DeformableExtension.cpp
     Engine/SimulationSpace/SimulationCoordinatorExtension.cpp
+    Engine/SimulationSpace/SimulationSceneDocument.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1446,6 +1486,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(DeformableWorldValidation                 Exhibits/DeformableWorldValidation.cpp)
     frontier_register_exhibit(DeformableRuntimeExtensionValidation      Exhibits/DeformableRuntimeExtensionValidation.cpp)
     frontier_register_exhibit(UnifiedSimulationCouplingValidation       Exhibits/UnifiedSimulationCouplingValidation.cpp)
+    frontier_register_exhibit(SimulationSceneValidation                 Exhibits/SimulationSceneValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)
