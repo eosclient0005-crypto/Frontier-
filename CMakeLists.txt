@@ -983,6 +983,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/ForceFields/ForceFieldGpuUploader.cpp
     Engine/SimulationSpace/EffectLayers/EffectLayerSpecification.cpp
     Engine/SimulationSpace/EffectLayers/EffectLayerStack.cpp
+    Engine/ParticleSpace/FireworkPatternSampler.cpp
+    Engine/ParticleSpace/ParticleTemplateRegistry.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
