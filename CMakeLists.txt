@@ -677,6 +677,10 @@ frontier_compile_fluid_slang_shader(FluidDivergencePressureCompute.slang  Pressu
 frontier_compile_fluid_slang_shader(FluidGradientShiftCompute.slang       GradientComputeEntry   compute FluidGradientCompute.comp.spv)
 frontier_compile_fluid_slang_shader(FluidGradientShiftCompute.slang       ShiftComputeEntry      compute FluidShiftCompute.comp.spv)
 frontier_compile_fluid_slang_shader(FluidGradientShiftCompute.slang       OccupancyComputeEntry  compute FluidOccupancyCompute.comp.spv)
+frontier_compile_fluid_slang_shader(FluidVolumeRaymarch.slang             FullscreenVertexEntry  vertex   FluidVolumeRaymarch.vert.spv)
+frontier_compile_fluid_slang_shader(FluidVolumeRaymarch.slang             FragmentEntry          fragment FluidVolumeRaymarch.frag.spv)
+frontier_compile_fluid_slang_shader(SimulationPostOverlay.slang           FullscreenVertexEntry  vertex   SimulationPostOverlay.vert.spv)
+frontier_compile_fluid_slang_shader(SimulationPostOverlay.slang           FragmentEntry          fragment SimulationPostOverlay.frag.spv)
 
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
@@ -1074,6 +1078,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ParticleSpace/ParticleGpuRenderer.cpp
     Engine/SimulationSpace/Fluid/SparseTileBank.cpp
     Engine/SimulationSpace/Fluid/FluidGpuSolver.cpp
+    Engine/SimulationSpace/Fluid/FluidVolumeRenderer.cpp
+    Engine/SimulationSpace/Fluid/FluidSimulationPostOverlay.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
