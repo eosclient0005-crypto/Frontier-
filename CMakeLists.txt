@@ -1079,6 +1079,9 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Codecs/PhotometricProfile.cpp
     Engine/Codecs/PhotometrySpaceCodec.cpp
     Engine/Codecs/VolumetricSpaceCodec.cpp
+    Engine/Codecs/Simulation/ForceFieldCodec.cpp
+    Engine/Codecs/Simulation/FluidGridCodec.cpp
+    Engine/Codecs/Simulation/ParticleSpaceCodec.cpp
     Engine/Codecs/RenderSpaceCodec.cpp
     Engine/Codecs/WorldSpaceCodec.cpp
     Engine/Codecs/ControlVehicleSurfaceDecoder.cpp
@@ -1410,6 +1413,7 @@ if(BUILD_TESTING)
     target_compile_definitions(ForceFieldValidation PRIVATE FRONTIER_FORCEFIELD_WITH_LIVE_JOLT=1)
     frontier_register_exhibit(ParticleGpuPhysicsValidation              Exhibits/ParticleGpuPhysicsValidation.cpp)
     frontier_register_exhibit(FluidSolverValidation                     Exhibits/FluidSolverValidation.cpp)
+    frontier_register_exhibit(SimulationCodecValidation                 Exhibits/SimulationCodecValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)
