@@ -51,8 +51,22 @@ CageEmbeddedSurface TetrahedralCageEmbedder::EmbedIntoFemSolid(
     const uint32_t S = hasTireLayout ? body.FemTires[0].SectorCount : 1u;
     const uint32_t P = hasTireLayout ? body.FemTires[0].ProfileCount : 2u;
     const uint32_t tetsPerSector = hasTireLayout ? ((P - 1u) * 5u) : body.TetCount;
-    const float hx = hasTireLayout ? body.FemTires[0].AxleX : 0.0f;
-    const float hy = hasTireLayout ? body.FemTires[0].AxleY : 0.0f;
+    float hx = 0.0f;
+    float hy = 0.0f;
+    if (hasTireLayout)
+    {
+        const uint32_t base = body.FemTires[0].StartPointIndex;
+        const uint32_t cagePts = S * P * 2u;
+        double sumX = 0.0, sumY = 0.0;
+        for (uint32_t k = 0u; k < cagePts; ++k)
+        {
+            const size_t i3 = static_cast<size_t>(base + k) * 3u;
+            sumX += pos[i3 + 0u];
+            sumY += pos[i3 + 1u];
+        }
+        hx = static_cast<float>(sumX / static_cast<double>(cagePts));
+        hy = static_cast<float>(sumY / static_cast<double>(cagePts));
+    }
 
     float maxRestErr = 0.0f;
     float maxAbsW    = 0.0f;

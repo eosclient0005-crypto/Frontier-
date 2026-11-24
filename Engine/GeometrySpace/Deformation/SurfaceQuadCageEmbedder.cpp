@@ -48,7 +48,20 @@ CageEmbeddedSurface SurfaceQuadCageEmbedder::EmbedIntoPneumaticCarcass(
     const uint32_t P    = ty.ProfileCount;
     const uint32_t base = ty.StartPointIndex;
     const float* pos    = body.RestPositions.data();
-    const float hx = ty.AxleX, hy = ty.AxleY, hz = ty.AxleZ;
+
+    // Derive exact rest axle center from RestPositions (invariant even if live ty.AxleY has already displaced)
+    double sumX = 0.0, sumY = 0.0, sumZ = 0.0;
+    const uint32_t cagePts = S * P;
+    for (uint32_t k = 0u; k < cagePts; ++k)
+    {
+        const size_t i3 = static_cast<size_t>(base + k) * 3u;
+        sumX += pos[i3 + 0u];
+        sumY += pos[i3 + 1u];
+        sumZ += pos[i3 + 2u];
+    }
+    const float hx = static_cast<float>(sumX / static_cast<double>(cagePts));
+    const float hy = static_cast<float>(sumY / static_cast<double>(cagePts));
+    const float hz = static_cast<float>(sumZ / static_cast<double>(cagePts));
 
     float maxRestErr = 0.0f;
     float maxAbsW    = 0.0f;

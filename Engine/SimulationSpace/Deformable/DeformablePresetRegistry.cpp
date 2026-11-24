@@ -91,7 +91,7 @@ const std::array<DeformablePresetDescriptor, 9u> kPresets = {{
       MakeConfig(5u, 4.4f, 2.6f, 1.7f, 1600.0f, 0.25f, 0.985f, 0.0f, 30.0f, 1.35f, 0.0f, 2.4f, 0.44f, true),
       -1.78f, { 0.45f, -0.20f, 0.45f }, 0.48f },
     { DeformablePresetKind::WovenCloth,         "cloth",      "WovenCloth",         "Woven Cloth",           "Tearable",
-      MakeConfig(6u, -9.2f, 3.6f, 1.6f, 1800.0f, 0.40f, 0.992f, 2.2f),
+      MakeConfig(6u, -9.2f, 3.6f, 1.6f, 1800.0f, 0.40f, 0.992f, 2.65f),
       -1.78f, { 0.0f, 0.25f, 0.85f }, 0.45f }
 }};
 
@@ -578,12 +578,17 @@ void DeformablePresetRegistry::AppendWovenCloth(DeformableBody& body, uint32_t c
         for (uint32_t c = 0u; c < cols; ++c)
         {
             const uint32_t i = startIdx + r * cols + c;
-            if (c + 1u < cols) sheet.HorizontalEdges[r * (cols - 1u) + c] = body.AppendDistanceConstraint(i, i + 1u, 1800.0f, 2.2f, true);
-            if (r + 1u < rows) sheet.VerticalEdges[r * cols + c]          = body.AppendDistanceConstraint(i, i + cols, 1800.0f, 2.2f, true);
+            const bool topHem = (r == 0u);
+            const float hStiff = topHem ? 3800.0f : 1800.0f;
+            const float hBreak = topHem ? 0.0f : 2.35f;
+            const float vStiff = topHem ? 3200.0f : 1800.0f;
+            const float vBreak = topHem ? 0.0f : 2.35f;
+            if (c + 1u < cols) sheet.HorizontalEdges[r * (cols - 1u) + c] = body.AppendDistanceConstraint(i, i + 1u, hStiff, hBreak, true);
+            if (r + 1u < rows) sheet.VerticalEdges[r * cols + c]          = body.AppendDistanceConstraint(i, i + cols, vStiff, vBreak, true);
             if (c + 1u < cols && r + 1u < rows)
             {
-                body.AppendDistanceConstraint(i, i + cols + 1u, 650.0f, 2.4f, false);
-                body.AppendDistanceConstraint(i + 1u, i + cols, 650.0f, 2.4f, false);
+                body.AppendDistanceConstraint(i, i + cols + 1u, 650.0f, topHem ? 0.0f : 2.6f, false);
+                body.AppendDistanceConstraint(i + 1u, i + cols, 650.0f, topHem ? 0.0f : 2.6f, false);
             }
             if (c + 2u < cols) body.AppendBendConstraint(i, i + 2u, 22.0f);
             if (r + 2u < rows) body.AppendBendConstraint(i, i + cols * 2u, 22.0f);
