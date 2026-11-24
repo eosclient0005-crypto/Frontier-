@@ -136,6 +136,10 @@ void WorldSimulationSession::Tick(double deltaSeconds, const std::array<float, 3
     (void)ReplayRecorder_.ApplyPlaybackForTick(Coordinator_->InspectTelemetry().CompletedTicks, *Coordinator_);
     Sequence_->Tick(clampedDt);
     (void)EventTimeline_.EvaluateUpToTime(Coordinator_->InspectTelemetry().AccumulatedSeconds, *Coordinator_);
+    if (AtlasFleet_.QueryInstanceCount() > 0u)
+    {
+        (void)AtlasFleet_.StepFleet(static_cast<float>(clampedDt), cameraWorldPos);
+    }
     const auto t1 = std::chrono::steady_clock::now();
 
     const float elapsedUs = static_cast<float>(
@@ -172,6 +176,10 @@ bool WorldSimulationSession::StepSingleTick(
     (void)ReplayRecorder_.ApplyPlaybackForTick(Coordinator_->InspectTelemetry().CompletedTicks, *Coordinator_);
     Sequence_->Tick(clampedDt);
     (void)EventTimeline_.EvaluateUpToTime(Coordinator_->InspectTelemetry().AccumulatedSeconds, *Coordinator_);
+    if (AtlasFleet_.QueryInstanceCount() > 0u)
+    {
+        (void)AtlasFleet_.StepFleet(static_cast<float>(clampedDt), cameraWorldPos);
+    }
     const auto t1 = std::chrono::steady_clock::now();
     Coordinator_->SetShouldUpdate(prevShouldUpdate);
 
@@ -318,6 +326,14 @@ AeroBuoyancyStepReport WorldSimulationSession::ApplyAeroBuoyancy(
 {
     if (!Coordinator_) return {};
     return SimulationAeroBuoyancyBridge::StepPool(*Coordinator_, physicsPool, deltaTimeSeconds, params);
+}
+
+FractureCouplingReport WorldSimulationSession::TriggerFractureImpact(
+    const FractureImpactEvent& impact,
+    PhysicsDomainPool* shardPool) noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationFractureCouplingBridge::TriggerFractureImpact(*Coordinator_, impact, shardPool, &AcousticBridge_);
 }
 
 SimulationPointProbe WorldSimulationSession::SampleWorldPoint(

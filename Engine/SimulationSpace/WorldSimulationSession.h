@@ -15,11 +15,13 @@
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/SimulationSpace/ComponentClassSimulationAssembler.h"
 #include "Engine/SimulationSpace/ComponentSimulationPreviewDriver.h"
+#include "Engine/SimulationSpace/Deformable/VertexAtlasFleetTable.h"
 #include "Engine/SimulationSpace/SimulationAcousticBridge.h"
 #include "Engine/SimulationSpace/SimulationAeroBuoyancyBridge.h"
 #include "Engine/SimulationSpace/SimulationBudgetGovernor.h"
 #include "Engine/SimulationSpace/SimulationCheckpointBuffer.h"
 #include "Engine/SimulationSpace/SimulationEventTimeline.h"
+#include "Engine/SimulationSpace/SimulationFractureCouplingBridge.h"
 #include "Engine/SimulationSpace/SimulationGpuRenderFeed.h"
 #include "Engine/SimulationSpace/SimulationInteractionBridge.h"
 #include "Engine/SimulationSpace/SimulationReplayRecorder.h"
@@ -124,6 +126,15 @@ public:
         float deltaTimeSeconds,
         const AeroBuoyancyParameters& params = {}) const noexcept;
 
+    /// Multi-clip .VertexAtlas fleet instancing table (stepped automatically during Tick / StepSingleTick in 0 allocs).
+    [[nodiscard]] Deformable::VertexAtlasFleetTable&       AccessAtlasFleet() noexcept { return AtlasFleet_; }
+    [[nodiscard]] const Deformable::VertexAtlasFleetTable& InspectAtlasFleet() const noexcept { return AtlasFleet_; }
+
+    /// Triggers coupled destructible fracture impact across Fluid dust, SoftBodies, Physics shards & Acoustics (0 allocs).
+    [[nodiscard]] FractureCouplingReport TriggerFractureImpact(
+        const FractureImpactEvent& impact,
+        PhysicsDomainPool* shardPool = nullptr) noexcept;
+
     /// Zero-allocation interactive manipulation & multi-domain spatial probe helpers.
     [[nodiscard]] SoftBodyGrabHandle       PickSoftBodyPoint(const std::array<float, 3>& rayOrigin, const std::array<float, 3>& rayDir, float maxDistM = 0.25f) const noexcept;
     [[nodiscard]] bool                     BeginSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept;
@@ -182,6 +193,7 @@ private:
     SimulationTriggerRouter                         TriggerRouter_  {};
     SimulationReplayRecorder                        ReplayRecorder_ {};
     SimulationAcousticBridge                        AcousticBridge_ {};
+    Deformable::VertexAtlasFleetTable               AtlasFleet_     {};
 };
 
 } // namespace Frontier::SimulationSpace
