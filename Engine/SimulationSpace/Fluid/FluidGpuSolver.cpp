@@ -1202,4 +1202,510 @@ float MeasureMaxFluidDivergenceCpu(
     return maxDiv;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                              REAL ASYNC VULKAN 1.2 FLUID GPU EXECUTOR (MERGE-PREP U03)
+//------------------------------------------------------------------------------------------------------------------------
+
+FluidVulkanGpuExecutor::~FluidVulkanGpuExecutor()
+{
+    Teardown();
+}
+
+#if FRONTIER_FLUID_HAS_VULKAN
+bool FluidVulkanGpuExecutor::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+{
+    Interchange_ = interchange;
+    if (Interchange_ == nullptr || !Interchange_->Ready())
+    {
+        GpuLiveReady_    = false;
+        Telemetry_.Route = FluidExecutionRoute::HeadlessCpuMirror;
+        return false;
+    }
+    return true;
+}
+#endif
+
+bool FluidVulkanGpuExecutor::Initialize(
+    const std::array<uint32_t, 3>& gridCells,
+    float cellSizeMeters,
+    const std::array<float, 3>& centreMeters,
+    const std::filesystem::path& compiledShaderDirectory)
+{
+    Teardown();
+    GridCells_      = { std::max(4u, gridCells[0]), std::max(4u, gridCells[1]), std::max(4u, gridCells[2]) };
+    CellSizeMeters_ = std::max(0.01f, cellSizeMeters);
+    CentreMeters_   = centreMeters;
+    SimTime_        = 0.0;
+    ScratchOccupancy_.reserve(kMaxOccupancyFloat4s);
+    ScratchOccupancy_.clear();
+
+    Telemetry_ = {};
+
+#if FRONTIER_FLUID_HAS_VULKAN
+    if (Interchange_ != nullptr && Interchange_->Ready())
+    {
+        GpuLiveReady_ = InitializeGpuResources(compiledShaderDirectory);
+    }
+    (void)OccupancyReadbackRing_.Initialize(kMaxOccupancyFloat4s, GpuLiveReady_ ? Interchange_ : nullptr);
+    Telemetry_.Route = GpuLiveReady_ ? FluidExecutionRoute::VulkanComputeGpu : FluidExecutionRoute::HeadlessCpuMirror;
+#else
+    (void)compiledShaderDirectory;
+    GpuLiveReady_ = false;
+    (void)OccupancyReadbackRing_.Initialize(kMaxOccupancyFloat4s);
+    Telemetry_.Route = FluidExecutionRoute::HeadlessCpuMirror;
+#endif
+
+    Initialized_ = true;
+    return true;
+}
+
+void FluidVulkanGpuExecutor::Teardown() noexcept
+{
+    OccupancyReadbackRing_.Teardown();
+#if FRONTIER_FLUID_HAS_VULKAN
+    ReleaseGpuResources();
+#endif
+    ScratchOccupancy_.clear();
+    Telemetry_    = {};
+    Initialized_  = false;
+    GpuLiveReady_ = false;
+}
+
+void FluidVulkanGpuExecutor::ExecuteStep(
+    FluidCpuSimulationState& headlessFallbackState,
+    const FluidStepSettings& settings,
+    std::span<const FluidReleaseSourceParameters> sources,
+    std::span<const Frontier::SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+    std::span<const FluidColliderSphere> colliders,
+    float deltaTimeSeconds)
+{
+    if (!Initialized_ || deltaTimeSeconds <= 0.0f) return;
+
+    SimTime_ += static_cast<double>(deltaTimeSeconds);
+    const uint32_t nextSlot = (Telemetry_.ActiveRingSlot + 1u) % kTripleBufferSlots;
+    Telemetry_.ActiveRingSlot = nextSlot;
+
+#if FRONTIER_FLUID_HAS_VULKAN
+    if (GpuLiveReady_ && Interchange_ != nullptr && Interchange_->Ready())
+    {
+        // Real Async Vulkan 1.2 3D texture compute path: ZERO StepFluidSimulationCpu call, ZERO mid-frame stall!
+        DispatchGpuAsync(settings, sources, forceRecords, colliders, deltaTimeSeconds);
+        (void)OccupancyReadbackRing_.PollNonBlocking();
+        Telemetry_.Route             = FluidExecutionRoute::VulkanComputeGpu;
+        Telemetry_.RealGpuDispatched = true;
+        Telemetry_.CompletedTicks   += 1ull;
+        return;
+    }
+#endif
+
+    // Strict headless CPU fallback ONLY when VulkanInterchange is unavailable/unready
+    StepFluidSimulationCpu(headlessFallbackState, settings, sources, forceRecords, colliders, deltaTimeSeconds);
+    Telemetry_.Route             = FluidExecutionRoute::HeadlessCpuMirror;
+    Telemetry_.RealGpuDispatched = false;
+    Telemetry_.CompletedTicks   += 1ull;
+
+    // 3-slot non-blocking occupancy ring parity in headless mode (1-frame latency, zero allocs)
+    ScratchOccupancy_.resize(1u);
+    float peakD = 0.0f;
+    for (const auto& cell : headlessFallbackState.State.Cells)
+    {
+        peakD = std::max(peakD, cell[0]);
+    }
+    ScratchOccupancy_[0] = { peakD, static_cast<float>(headlessFallbackState.StepCount), 0.0f, 1.0f };
+    OccupancyReadbackRing_.SubmitHeadlessSnapshot(ScratchOccupancy_, Telemetry_.CompletedTicks);
+    if (Telemetry_.CompletedTicks > 1ull)
+    {
+        (void)OccupancyReadbackRing_.PollNonBlocking(Telemetry_.CompletedTicks - 1ull);
+    }
+}
+
+bool FluidVulkanGpuExecutor::PollAsyncOccupancyReadback() noexcept
+{
+#if FRONTIER_FLUID_HAS_VULKAN
+    if (GpuLiveReady_)
+    {
+        RetireCompletedCommandBuffersNonBlocking();
+        return OccupancyReadbackRing_.PollNonBlocking();
+    }
+#endif
+    return OccupancyReadbackRing_.PollNonBlocking(Telemetry_.CompletedTicks);
+}
+
+#if FRONTIER_FLUID_HAS_VULKAN
+void FluidVulkanGpuExecutor::RetireCompletedCommandBuffersNonBlocking() noexcept
+{
+    if (Interchange_ == nullptr || !Interchange_->Ready()) return;
+    for (auto& pending : InFlightCommands_)
+    {
+        if (pending.CmdBuffer != VK_NULL_HANDLE &&
+            Interchange_->QueryTimelineReached(pending.TimelineSignal))
+        {
+            Interchange_->FreeCommandBuffer(pending.CmdBuffer);
+            pending.CmdBuffer      = VK_NULL_HANDLE;
+            pending.TimelineSignal = 0ull;
+        }
+    }
+}
+
+bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path& shaderDir)
+{
+    using namespace GeometricRaster;
+    ReleaseGpuResources();
+
+    if (Interchange_ == nullptr || !Interchange_->Ready()) return false;
+    if (!Encoder_.InitializeEncoder(Interchange_, 512u)) return false;
+
+    const auto spvInject = shaderDir / "FluidInjectCompute.comp.spv";
+    const auto spvAdvect = shaderDir / "FluidAdvectCompute.comp.spv";
+    const auto spvThermo = shaderDir / "FluidThermodynamicsCompute.comp.spv";
+    const auto spvForces = shaderDir / "FluidForcesCompute.comp.spv";
+    const auto spvCurl   = shaderDir / "FluidCurlCompute.comp.spv";
+    const auto spvVort   = shaderDir / "FluidVorticityCompute.comp.spv";
+    const auto spvDiv    = shaderDir / "FluidDivergenceCompute.comp.spv";
+    const auto spvPress  = shaderDir / "FluidPressureCompute.comp.spv";
+    const auto spvGrad   = shaderDir / "FluidGradientCompute.comp.spv";
+    if (!std::filesystem::exists(spvInject) || !std::filesystem::exists(spvAdvect) || !std::filesystem::exists(spvGrad))
+    {
+        Encoder_.TeardownEncoder();
+        return false;
+    }
+
+    const std::array<VkDescriptorType, 3> injectSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+    };
+    const std::array<VkDescriptorType, 5> advectSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLER
+    };
+    const std::array<VkDescriptorType, 5> forcesSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+    };
+    const std::array<VkDescriptorType, 4> vortSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+    };
+    const std::array<VkDescriptorType, 7> divPressSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+    };
+    const std::array<VkDescriptorType, 8> gradSlots {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+    };
+
+    ProgInject_     = Encoder_.RegisterProgram(spvInject, injectSlots, "ComputeEntry");
+    ProgAdvect_     = Encoder_.RegisterProgram(spvAdvect, advectSlots, "ComputeEntry");
+    ProgThermo_     = Encoder_.RegisterProgram(spvThermo, injectSlots, "ComputeEntry");
+    ProgForces_     = Encoder_.RegisterProgram(spvForces, forcesSlots, "ComputeEntry");
+    ProgCurl_       = Encoder_.RegisterProgram(spvCurl,   vortSlots,   "CurlComputeEntry");
+    ProgVorticity_  = Encoder_.RegisterProgram(spvVort,   vortSlots,   "VorticityComputeEntry");
+    ProgDivergence_ = Encoder_.RegisterProgram(spvDiv,    divPressSlots, "DivergenceComputeEntry");
+    ProgPressure_   = Encoder_.RegisterProgram(spvPress,  divPressSlots, "PressureComputeEntry");
+    ProgGradient_   = Encoder_.RegisterProgram(spvGrad,   gradSlots,   "GradientComputeEntry");
+
+    if (ProgInject_ == 0u || ProgAdvect_ == 0u || ProgGradient_ == 0u)
+    {
+        ReleaseGpuResources();
+        return false;
+    }
+
+    VkSamplerCreateInfo samplerCi {};
+    samplerCi.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerCi.magFilter    = VK_FILTER_LINEAR;
+    samplerCi.minFilter    = VK_FILTER_LINEAR;
+    samplerCi.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCi.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    samplerCi.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    if (vkCreateSampler(Interchange_->AccessDevice(), &samplerCi, nullptr, &LinearSampler_) != VK_SUCCESS)
+    {
+        ReleaseGpuResources();
+        return false;
+    }
+
+    const VkImageUsageFlags volUsage =
+        VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    auto allocVol = [&]() -> DeviceImageResource
+    {
+        return Interchange_->AllocateImage3D(
+            GridCells_[0], GridCells_[1], GridCells_[2],
+            VK_FORMAT_R16G16B16A16_SFLOAT, volUsage, VK_IMAGE_ASPECT_COLOR_BIT);
+    };
+
+    ImgVelocity_[0] = allocVol(); ImgVelocity_[1] = allocVol();
+    ImgState_[0]    = allocVol(); ImgState_[1]    = allocVol();
+    ImgPressure_[0] = allocVol(); ImgPressure_[1] = allocVol();
+    ImgCurl_        = allocVol();
+    ImgDivergence_  = allocVol();
+    ImgScratchA_    = allocVol();
+    ImgScratchB_    = allocVol();
+
+    if (ImgVelocity_[0].ImageHandle == VK_NULL_HANDLE || ImgState_[0].ImageHandle == VK_NULL_HANDLE)
+    {
+        ReleaseGpuResources();
+        return false;
+    }
+
+    BufForceRecords_ = Encoder_.AllocateHostWritableBuffer(
+        64ull * sizeof(ForceFields::ForceModelGpuRecord), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufOccupancy_    = Encoder_.AllocateDeviceLocalBuffer(
+        static_cast<uint64_t>(kMaxOccupancyFloat4s) * 16ull,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+
+    for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
+    {
+        BufInjectUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidInjectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufAdvectUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidAdvectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufThermoUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidThermodynamicsUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufForcesUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidForcesUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufVortUbo_[s]   = Encoder_.AllocateHostWritableBuffer(sizeof(FluidVorticityUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufDivUbo_[s]    = Encoder_.AllocateHostWritableBuffer(sizeof(FluidDivergenceUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufPressUbo_[s]  = Encoder_.AllocateHostWritableBuffer(sizeof(FluidPressureUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufGradUbo_[s]   = Encoder_.AllocateHostWritableBuffer(sizeof(FluidGradientShiftUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    }
+
+    const uint64_t singleVolBytes =
+        static_cast<uint64_t>(GridCells_[0]) * GridCells_[1] * GridCells_[2] * 8ull; // RGBA16F = 8B/voxel
+    Telemetry_.AllocatedImageBytes = singleVolBytes * 10ull;
+    return true;
+}
+
+void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
+{
+    if (Interchange_ != nullptr && Interchange_->Ready())
+    {
+        RetireCompletedCommandBuffersNonBlocking();
+        for (auto& pending : InFlightCommands_)
+        {
+            if (pending.CmdBuffer != VK_NULL_HANDLE)
+            {
+                Interchange_->FreeCommandBuffer(pending.CmdBuffer);
+                pending = {};
+            }
+        }
+        auto relImg = [&](GeometricRaster::DeviceImageResource& img)
+        {
+            if (img.ImageHandle != VK_NULL_HANDLE) Interchange_->ReleaseImage2D(img);
+        };
+        relImg(ImgVelocity_[0]); relImg(ImgVelocity_[1]);
+        relImg(ImgState_[0]);    relImg(ImgState_[1]);
+        relImg(ImgPressure_[0]); relImg(ImgPressure_[1]);
+        relImg(ImgCurl_); relImg(ImgDivergence_); relImg(ImgScratchA_); relImg(ImgScratchB_);
+
+        auto relBuf = [&](GeometricRaster::DeviceBufferResource& b)
+        {
+            if (b.BufferHandle != VK_NULL_HANDLE) Interchange_->ReleaseBuffer(b);
+        };
+        relBuf(BufForceRecords_);
+        relBuf(BufOccupancy_);
+        for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
+        {
+            relBuf(BufInjectUbo_[s]); relBuf(BufAdvectUbo_[s]); relBuf(BufThermoUbo_[s]); relBuf(BufForcesUbo_[s]);
+            relBuf(BufVortUbo_[s]);   relBuf(BufDivUbo_[s]);    relBuf(BufPressUbo_[s]);  relBuf(BufGradUbo_[s]);
+        }
+        if (LinearSampler_ != VK_NULL_HANDLE)
+        {
+            vkDestroySampler(Interchange_->AccessDevice(), LinearSampler_, nullptr);
+            LinearSampler_ = VK_NULL_HANDLE;
+        }
+    }
+    Encoder_.TeardownEncoder();
+    GpuLiveReady_ = false;
+}
+
+void FluidVulkanGpuExecutor::DispatchGpuAsync(
+    const FluidStepSettings& settings,
+    std::span<const FluidReleaseSourceParameters> sources,
+    std::span<const Frontier::SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+    std::span<const FluidColliderSphere> colliders,
+    float deltaTimeSeconds) noexcept
+{
+    using namespace GeometricRaster;
+    RetireCompletedCommandBuffersNonBlocking();
+
+    const uint32_t slot = Telemetry_.ActiveRingSlot;
+    const uint32_t gx = (GridCells_[0] + 7u) / 8u;
+    const uint32_t gy = (GridCells_[1] + 7u) / 8u;
+    const uint32_t gz = (GridCells_[2] + 3u) / 4u;
+
+    FluidVolumeUniformBlock vol {};
+    vol.GridDimMode        = { static_cast<float>(GridCells_[0]), static_cast<float>(GridCells_[1]), static_cast<float>(GridCells_[2]), 0.0f };
+    vol.GridCentreCellSize = { CentreMeters_[0], CentreMeters_[1], CentreMeters_[2], CellSizeMeters_ };
+    vol.BoundaryAndCount   = { static_cast<float>(settings.Boundary), static_cast<float>(std::min<size_t>(colliders.size(), 4u)), 0.0f, 0.0f };
+    for (size_t i = 0u; i < std::min<size_t>(colliders.size(), 4u); ++i)
+    {
+        vol.ColliderSpheres[i] = { colliders[i].CentreMeters[0], colliders[i].CentreMeters[1], colliders[i].CentreMeters[2], colliders[i].RadiusMeters };
+    }
+
+    if (!forceRecords.empty() && BufForceRecords_.HostAddress != nullptr)
+    {
+        const size_t n = std::min<size_t>(forceRecords.size(), 64u);
+        std::memcpy(BufForceRecords_.HostAddress, forceRecords.data(), n * sizeof(ForceFields::ForceModelGpuRecord));
+    }
+
+    FluidInjectUniformBlock injectU {};
+    injectU.Volume       = vol;
+    injectU.InjectTiming = { static_cast<float>(SimTime_), static_cast<float>(std::min<size_t>(sources.size(), 6u)), deltaTimeSeconds, 0.0f };
+    for (size_t i = 0u; i < std::min<size_t>(sources.size(), 6u); ++i)
+    {
+        injectU.SourcePosRadius[i]     = { sources[i].PositionMeters[0], sources[i].PositionMeters[1], sources[i].PositionMeters[2], sources[i].RadiusMeters };
+        injectU.SourceVelDensity[i]    = { sources[i].VelocityMps[0], sources[i].VelocityMps[1], sources[i].VelocityMps[2], sources[i].Density };
+        injectU.SourceTempFuelShape[i] = { sources[i].Temperature, sources[i].Fuel, static_cast<float>(sources[i].Shape), sources[i].Jitter };
+    }
+    if (BufInjectUbo_[slot].HostAddress) std::memcpy(BufInjectUbo_[slot].HostAddress, &injectU, sizeof(injectU));
+
+    FluidAdvectUniformBlock advU {};
+    advU.Volume       = vol;
+    advU.AdvectParams = { deltaTimeSeconds, settings.Dissipation, 1.0f, 0.0f };
+    if (BufAdvectUbo_[slot].HostAddress) std::memcpy(BufAdvectUbo_[slot].HostAddress, &advU, sizeof(advU));
+
+    FluidThermodynamicsUniformBlock thermoU {};
+    thermoU.Volume        = vol;
+    thermoU.ThermoControl = { deltaTimeSeconds, settings.Cooling, settings.Combustion, settings.AmbientTemperature };
+    if (BufThermoUbo_[slot].HostAddress) std::memcpy(BufThermoUbo_[slot].HostAddress, &thermoU, sizeof(thermoU));
+
+    FluidForcesUniformBlock forcesU {};
+    forcesU.Volume          = vol;
+    forcesU.ForceKinematics = { deltaTimeSeconds, settings.Buoyancy, settings.Gravity, settings.AmbientTemperature };
+    forcesU.ForceControl    = { settings.ForceResponse, static_cast<float>(SimTime_), static_cast<float>(std::min<size_t>(forceRecords.size(), 64u)), 0.0f };
+    if (BufForcesUbo_[slot].HostAddress) std::memcpy(BufForcesUbo_[slot].HostAddress, &forcesU, sizeof(forcesU));
+
+    FluidDivergenceUniformBlock divU {};
+    divU.Volume            = vol;
+    divU.DivergenceControl = { settings.Expansion, settings.FireThreshold, settings.FireSoftness, 0.0f };
+    if (BufDivUbo_[slot].HostAddress) std::memcpy(BufDivUbo_[slot].HostAddress, &divU, sizeof(divU));
+
+    FluidPressureUniformBlock pressU {};
+    pressU.Volume          = vol;
+    pressU.PressureControl = { 1.0f, 0.0f, 0.0f, 0.0f };
+    if (BufPressUbo_[slot].HostAddress) std::memcpy(BufPressUbo_[slot].HostAddress, &pressU, sizeof(pressU));
+
+    FluidGradientShiftUniformBlock gradU {};
+    gradU.Volume = vol;
+    if (BufGradUbo_[slot].HostAddress) std::memcpy(BufGradUbo_[slot].HostAddress, &gradU, sizeof(gradU));
+
+    VkCommandBuffer cmd = Interchange_->BeginSingleTimeCommands();
+    if (cmd == VK_NULL_HANDLE) return;
+
+    auto emitBarrier = [&]()
+    {
+        VkMemoryBarrier mb {};
+        mb.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0u, 1u, &mb, 0u, nullptr, 0u, nullptr);
+    };
+
+    const uint32_t srcIdx = ActivePong_;
+    const uint32_t dstIdx = 1u - ActivePong_;
+    uint64_t dispatches = 0ull;
+
+    // 1. Inject -> 2. Advect -> 3. Thermodynamics -> 4. Forces -> 5. Divergence -> 6. Jacobi Pressure -> 7. Gradient
+    {
+        const std::array<ComputeSlotDescriptor, 3> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufInjectUbo_[slot].BufferHandle, sizeof(injectU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgInject_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+    {
+        const std::array<ComputeSlotDescriptor, 5> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[srcIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgAdvect_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+    {
+        const std::array<ComputeSlotDescriptor, 3> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufThermoUbo_[slot].BufferHandle, sizeof(thermoU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgThermo_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+    {
+        const std::array<ComputeSlotDescriptor, 5> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufForcesUbo_[slot].BufferHandle, sizeof(forcesU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufForceRecords_.BufferHandle,    VK_WHOLE_SIZE },
+            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgForces_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+    {
+        const std::array<ComputeSlotDescriptor, 7> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufDivUbo_[slot].BufferHandle,   sizeof(divU) },
+            { 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufPressUbo_[slot].BufferHandle, sizeof(pressU) },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDivergence_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDivergence_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgDivergence_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+
+    uint32_t pSrc = srcIdx;
+    const uint32_t jacobiIters = std::clamp(settings.PressureIterations, 2u, 48u);
+    for (uint32_t iter = 0u; iter < jacobiIters; ++iter)
+    {
+        const uint32_t pDst = 1u - pSrc;
+        const std::array<ComputeSlotDescriptor, 7> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufDivUbo_[slot].BufferHandle,   sizeof(divU) },
+            { 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufPressUbo_[slot].BufferHandle, sizeof(pressU) },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[pSrc].ViewHandle,   VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDivergence_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[pDst].ViewHandle,   VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgPressure_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+        pSrc = pDst;
+    }
+
+    {
+        const std::array<ComputeSlotDescriptor, 8> s {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufGradUbo_[slot].BufferHandle, sizeof(gradU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[pSrc].ViewHandle,   VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 7u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufOccupancy_.BufferHandle,     VK_WHOLE_SIZE }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgGradient_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+
+    ActivePong_ = dstIdx;
+
+    const bool encodedOcc = OccupancyReadbackRing_.EncodeAsyncCopy(cmd, BufOccupancy_.BufferHandle, kMaxOccupancyFloat4s);
+    const uint64_t submittedSignal = Interchange_->DispatchCommandBufferAsync(cmd);
+    Telemetry_.LastSubmittedTimeline = submittedSignal;
+    Telemetry_.TotalDispatches      += dispatches;
+    if (encodedOcc)
+    {
+        OccupancyReadbackRing_.BindActiveSlotTimeline(submittedSignal);
+    }
+
+    InFlightCommands_[slot].CmdBuffer      = cmd;
+    InFlightCommands_[slot].TimelineSignal = submittedSignal;
+}
+#endif
+
 } // namespace Frontier::SimulationSpace::Fluid

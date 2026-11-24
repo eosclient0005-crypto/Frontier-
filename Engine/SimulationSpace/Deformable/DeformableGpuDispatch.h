@@ -120,6 +120,12 @@ struct DeformableSubstepDispatchPlan
 class DeformableGpuDispatch
 {
 public:
+    /// Zero-allocation in-place packer: reuses `outPack` capacity across ticks (0 heap allocations after init).
+    static void PackBodyForGpuInto(
+        const DeformableBody& body,
+        const DeformableSimulationConfiguration& configuration,
+        DeformableGpuBufferPack& outPack);
+
     /// Packs `body` into 16-byte-aligned GPU SSBO arrays ready for vkCmdUpdateBuffer / staging upload.
     [[nodiscard]] static DeformableGpuBufferPack PackBodyForGpu(
         const DeformableBody& body,
@@ -129,6 +135,14 @@ public:
     static bool UnpackPositionsFromGpu(
         const DeformableGpuBufferPack& pack,
         DeformableBody& targetBody) noexcept;
+
+    /// Zero-allocation in-place dispatch planner: reuses `outPlan.Steps` capacity across ticks.
+    static void BuildTickDispatchPlanInto(
+        const DeformableBody& body,
+        const DeformableSimulationConfiguration& configuration,
+        DeformableSubstepDispatchPlan& outPlan,
+        bool appendVatSliceBake = false,
+        uint32_t highPolyVertexCount = 0u);
 
     /// Builds the exact lock-free conflict-colored Vulkan compute dispatch sequence for one simulation tick.
     [[nodiscard]] static DeformableSubstepDispatchPlan BuildTickDispatchPlan(

@@ -94,10 +94,18 @@ uint32_t VehicleReadingConverter::AccumulateRigidContactImpulses(
     }
 
     const size_t pCount = proxies.size();
-    std::vector<PhysicsSpace::RigidImpulseAccumulatorEntry> accum(pCount);
+    constexpr size_t kStackProxyCap = 64u;
+    std::array<PhysicsSpace::RigidImpulseAccumulatorEntry, kStackProxyCap> stackAccum {};
+    std::vector<PhysicsSpace::RigidImpulseAccumulatorEntry> heapAccum {};
+    PhysicsSpace::RigidImpulseAccumulatorEntry* accumData = stackAccum.data();
+    if (pCount > kStackProxyCap)
+    {
+        heapAccum.resize(pCount);
+        accumData = heapAccum.data();
+    }
     for (size_t pi = 0u; pi < pCount; ++pi)
     {
-        accum[pi].BodyToken.SlotIndex = proxies[pi].BodySlotIndex;
+        accumData[pi].BodyToken.SlotIndex = proxies[pi].BodySlotIndex;
     }
 
     uint32_t totalContacts = 0u;
@@ -136,7 +144,7 @@ uint32_t VehicleReadingConverter::AccumulateRigidContactImpulses(
             const float jy = -contact.SphereImpulseNs.Y - dy * scale;
             const float jz = -contact.SphereImpulseNs.Z - dz * scale;
 
-            PhysicsSpace::RigidImpulseAccumulatorEntry& e = accum[pi];
+            PhysicsSpace::RigidImpulseAccumulatorEntry& e = accumData[pi];
             e.LinearImpulse[0] += jx;
             e.LinearImpulse[1] += jy;
             e.LinearImpulse[2] += jz;
@@ -157,8 +165,9 @@ uint32_t VehicleReadingConverter::AccumulateRigidContactImpulses(
         }
     }
 
-    for (auto& e : accum)
+    for (size_t pi = 0u; pi < pCount; ++pi)
     {
+        auto& e = accumData[pi];
         if (e.ContactCount > 0u)
         {
             const float invC = 1.0f / static_cast<float>(e.ContactCount);

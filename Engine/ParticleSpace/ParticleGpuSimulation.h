@@ -13,10 +13,20 @@
 #include "Engine/ParticleSpace/CarrierSolidRegistry.h"
 #include "Engine/ParticleSpace/FireworkPatternSampler.h"
 #include "Engine/ParticleSpace/ParticleCloudTypes.h"
+#include "Engine/SimulationSpace/AsyncGpuReadbackRing.h"
 #include "Engine/SimulationSpace/ForceFields/ForceModelTypes.h"
+
+#if __has_include(<volk.h>)
+#define FRONTIER_PARTICLE_HAS_VULKAN 1
+#include "Engine/GeometricRaster/Compute/ComputeDispatchEncoder.h"
+#include "Engine/GeometricRaster/VulkanInterchange.h"
+#else
+#define FRONTIER_PARTICLE_HAS_VULKAN 0
+#endif
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <span>
 #include <string>
@@ -101,6 +111,20 @@ struct ParticleSimulationStatistics
 
 using GasVelocityQueryFn = std::function<std::array<float, 3>(const std::array<float, 3>& worldPos)>;
 
+/// Zero-allocation function-pointer + opaque context view for sampling fluid velocity on hot loops (0 heap allocs/tick).
+struct GasVelocitySamplerView
+{
+    using SampleCallbackFn = std::array<float, 3>(*)(const void* userContext, const std::array<float, 3>& worldPos) noexcept;
+    SampleCallbackFn Callback    = nullptr;
+    const void*      UserContext = nullptr;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return Callback != nullptr; }
+    [[nodiscard]] std::array<float, 3> Sample(const std::array<float, 3>& worldPos) const noexcept
+    {
+        return (Callback != nullptr) ? Callback(UserContext, worldPos) : std::array<float, 3> { 0.0f, 0.0f, 0.0f };
+    }
+};
+
 /// Per-cloud ping-pong particle state, previous positions, and baked anchor texels.
 struct ParticleCloudStateRecord
 {
@@ -109,6 +133,8 @@ struct ParticleCloudStateRecord
     uint32_t                            Capacity           = 2304u;
     uint32_t                            ActiveCount        = 2048u;
     bool                                NeedsReset         = true;
+    uint64_t                            FormationHash      = 0ull;
+    uint64_t                            AnchorHash         = 0ull;
     std::string                         FormationSignature {};
     std::string                         AnchorSignature    {};
     AnchorTexelTable                    AnchorTexels       {};
@@ -173,7 +199,14 @@ struct ParticleCloudStateRecord
     const std::array<float, 3>& restHome,
     float timeSeconds) noexcept;
 
-/// Bit-accurate CPU mirror of ParticleUpdateCompute.slang::ComputeEntry for all particles in a cloud.
+/// Zero-allocation CPU mirror of ParticleUpdateCompute.slang::ComputeEntry using GasVelocitySamplerView.
+void StepParticleCloudCpu(
+    ParticleCloudStateRecord& record,
+    const ParticleUpdateUniformBlock& uniforms,
+    std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+    GasVelocitySamplerView gasVelocitySampler);
+
+/// Backward-compatible overload accepting std::function GasVelocityQueryFn.
 void StepParticleCloudCpu(
     ParticleCloudStateRecord& record,
     const ParticleUpdateUniformBlock& uniforms,
@@ -209,7 +242,17 @@ public:
     [[nodiscard]] const ParticleCloudStateRecord* FindCloudRecord(std::string_view nodeId) const noexcept;
     [[nodiscard]] ParticleSimulationStatistics QueryStatistics() const noexcept { return Statistics; }
 
-    /// Steps all enabled non-halted clouds using the bit-accurate CPU compute mirror & builds GPU uniform blocks.
+    /// Zero-allocation CPU stepping overload using GasVelocitySamplerView (0 heap allocations in steady state).
+    void StepCloudsCpu(
+        std::span<const ParticleCloudNode> clouds,
+        const CarrierSolidRegistry& solidRegistry,
+        const ParticleSimulationRegion& region,
+        float simulationTimeSeconds,
+        float deltaTimeSeconds,
+        std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+        GasVelocitySamplerView gasVelocitySampler);
+
+    /// Backward-compatible overload accepting std::function GasVelocityQueryFn.
     void StepCloudsCpu(
         std::span<const ParticleCloudNode> clouds,
         const CarrierSolidRegistry& solidRegistry,
@@ -228,6 +271,126 @@ private:
 
     std::vector<ParticleCloudStateRecord> Records    {};
     ParticleSimulationStatistics          Statistics {};
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                             REAL ASYNC VULKAN 1.2 PARTICLE GPU EXECUTOR (MERGE-PREP U03)
+//------------------------------------------------------------------------------------------------------------------------
+
+enum class ParticleExecutionRoute : uint8_t
+{
+    HeadlessCpuMirror = 0u, // Headless CPU fallback ONLY when VulkanInterchange is unavailable/unready
+    VulkanComputeGpu  = 1u  // Real Async Vulkan 1.2 SSBO vkCmdDispatch execution (zero mid-frame stalls)
+};
+
+struct ParticleGpuExecutorTelemetry
+{
+    ParticleExecutionRoute Route                 = ParticleExecutionRoute::HeadlessCpuMirror;
+    uint32_t               ActiveRingSlot        = 0u;
+    uint64_t               CompletedTicks        = 0ull;
+    uint64_t               TotalDispatches       = 0ull;
+    uint64_t               LastSubmittedTimeline = 0ull;
+    uint64_t               AllocatedSsboBytes    = 0ull;
+    bool                   RealGpuDispatched     = false;
+};
+
+/// 64-byte ABI-identical mirror of RigidImpulseAccumulatorEntry for async Particle->Rigid impulse readback.
+struct alignas(16) ParticleRigidImpulseEntry
+{
+    uint32_t BodySlotIndex      = 0u;
+    uint32_t ContactSampleCount = 0u;
+    uint32_t Reserved[2]        = { 0u, 0u };
+    float    LinearImpulseNs[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+    float    AngularImpulse[4]  = { 0.0f, 0.0f, 0.0f, 0.0f };
+    float    ContactCentroid[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+};
+static_assert(sizeof(ParticleRigidImpulseEntry) == 64u, "ParticleRigidImpulseEntry must remain 64 bytes.");
+
+/// Real Async Vulkan 1.2 Particle compute executor using VulkanInterchange + isolated ComputeDispatchEncoder +
+/// DispatchCommandBufferAsync + 3-slot non-blocking AsyncGpuReadbackRing for Particle->Rigid atomic impulse feedback.
+class ParticleVulkanGpuExecutor
+{
+public:
+    static constexpr uint32_t kTripleBufferSlots    = 3u;
+    static constexpr uint32_t kMaxImpulseEntries    = 64u;
+
+    ParticleVulkanGpuExecutor() = default;
+    ~ParticleVulkanGpuExecutor();
+
+    ParticleVulkanGpuExecutor(const ParticleVulkanGpuExecutor&)            = delete;
+    ParticleVulkanGpuExecutor& operator=(const ParticleVulkanGpuExecutor&) = delete;
+
+#if FRONTIER_PARTICLE_HAS_VULKAN
+    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+#endif
+
+    [[nodiscard]] bool Initialize(
+        uint32_t maxParticleCapacity = 4096u,
+        const std::filesystem::path& compiledShaderDirectory = "CompiledShaders");
+
+    void Teardown() noexcept;
+
+    /// Executes one particle tick: dispatches real Vulkan 1.2 compute shaders asynchronously when GPU-backed
+    /// (ZERO StepCloudsCpu call on live hardware GPU), or runs headless CPU fallback when unbacked.
+    void ExecuteStep(
+        ParticleGpuSimulation& headlessFallbackSim,
+        std::span<const ParticleCloudNode> clouds,
+        const CarrierSolidRegistry& solidRegistry,
+        const ParticleSimulationRegion& region,
+        float simulationTimeSeconds,
+        float deltaTimeSeconds,
+        std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+        GasVelocitySamplerView headlessGasSampler = {});
+
+    /// Non-blocking poll of the 3-slot Particle->Rigid impulse readback ring (1-2 frames latency, zero stall).
+    [[nodiscard]] bool PollAsyncImpulseReadback() noexcept;
+    [[nodiscard]] std::span<const ParticleRigidImpulseEntry> InspectCompletedImpulseFeedback() const noexcept
+    {
+        return ImpulseReadbackRing_.InspectLatestCompleted();
+    }
+
+    [[nodiscard]] bool Ready() const noexcept { return Initialized_; }
+    [[nodiscard]] const ParticleGpuExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
+
+private:
+    uint32_t                     MaxParticleCapacity_ = 4096u;
+    uint32_t                     ActivePong_          = 0u;
+    ParticleGpuExecutorTelemetry Telemetry_           {};
+    SimulationSpace::AsyncGpuReadbackRing<ParticleRigidImpulseEntry, kTripleBufferSlots> ImpulseReadbackRing_ {};
+    bool                         Initialized_         = false;
+    bool                         GpuLiveReady_        = false;
+
+#if FRONTIER_PARTICLE_HAS_VULKAN
+    struct PendingCmd
+    {
+        VkCommandBuffer CmdBuffer      = VK_NULL_HANDLE;
+        uint64_t        TimelineSignal = 0ull;
+    };
+
+    void RetireCompletedCommandBuffersNonBlocking() noexcept;
+    [[nodiscard]] bool InitializeGpuResources(const std::filesystem::path& shaderDir);
+    void ReleaseGpuResources() noexcept;
+    void DispatchGpuAsync(
+        std::span<const ParticleCloudNode> clouds,
+        const ParticleSimulationRegion& region,
+        float simulationTimeSeconds,
+        float deltaTimeSeconds,
+        std::span<const SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords) noexcept;
+
+    GeometricRaster::VulkanInterchange*                   Interchange_       = nullptr;
+    GeometricRaster::ComputeDispatchEncoder               Encoder_           {};
+    VkSampler                                             LinearSampler_     = VK_NULL_HANDLE;
+    uint32_t                                              ProgUpdate_        = 0u;
+    uint32_t                                              ProgTrail_         = 0u;
+    std::array<GeometricRaster::DeviceBufferResource, 2>  BufStates_         {};
+    GeometricRaster::DeviceBufferResource                 BufPrevPos_        {};
+    GeometricRaster::DeviceBufferResource                 BufAnchors_        {};
+    GeometricRaster::DeviceBufferResource                 BufForces_         {};
+    GeometricRaster::DeviceBufferResource                 BufImpulseAtomic_  {};
+    GeometricRaster::DeviceImageResource                  ImgFallbackGas_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufUpdateUbo_ {};
+    std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
+#endif
 };
 
 } // namespace Frontier::ParticleSpace

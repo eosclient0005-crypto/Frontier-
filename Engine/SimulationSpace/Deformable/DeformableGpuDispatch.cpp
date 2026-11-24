@@ -29,11 +29,11 @@ namespace
 //                                                 DEFORMABLE GPU DISPATCH
 //------------------------------------------------------------------------------------------------------------------------
 
-DeformableGpuBufferPack DeformableGpuDispatch::PackBodyForGpu(
+void DeformableGpuDispatch::PackBodyForGpuInto(
     const DeformableBody& body,
-    const DeformableSimulationConfiguration& configuration)
+    const DeformableSimulationConfiguration& configuration,
+    DeformableGpuBufferPack& pack)
 {
-    DeformableGpuBufferPack pack {};
     const uint32_t N = body.PointCount;
     pack.PositionsInvMass.resize(N);
     pack.PrevPositionsStrain.resize(N);
@@ -79,7 +79,13 @@ DeformableGpuBufferPack DeformableGpuDispatch::PackBodyForGpu(
             c.Severed ? 1u : 0u
         };
     }
-    pack.DistanceBatchOrder = body.DistanceBatches.OrderedOrdinals;
+    pack.DistanceBatchOrder.resize(body.DistanceBatches.OrderedOrdinals.size());
+    if (!body.DistanceBatches.OrderedOrdinals.empty())
+    {
+        std::copy(body.DistanceBatches.OrderedOrdinals.begin(),
+                  body.DistanceBatches.OrderedOrdinals.end(),
+                  pack.DistanceBatchOrder.begin());
+    }
 
     const float bendScale = std::max(0.01f, configuration.BendStiffness);
     pack.BendConstraints.resize(body.BendConstraints.size());
@@ -96,7 +102,13 @@ DeformableGpuBufferPack DeformableGpuDispatch::PackBodyForGpu(
             0u
         };
     }
-    pack.BendBatchOrder = body.BendBatches.OrderedOrdinals;
+    pack.BendBatchOrder.resize(body.BendBatches.OrderedOrdinals.size());
+    if (!body.BendBatches.OrderedOrdinals.empty())
+    {
+        std::copy(body.BendBatches.OrderedOrdinals.begin(),
+                  body.BendBatches.OrderedOrdinals.end(),
+                  pack.BendBatchOrder.begin());
+    }
 
     // Lame parameters from Young's modulus E [MPa] & Poisson ratio nu [-]
     const float E  = std::max(0.05f, configuration.FemYoungMpa) * 1.0e6f;
@@ -125,7 +137,13 @@ DeformableGpuBufferPack DeformableGpuDispatch::PackBodyForGpu(
         pack.TetCofactorCols[static_cast<size_t>(t) * 3u + 1u] = { cof[3], cof[4], cof[5], 0.0f };
         pack.TetCofactorCols[static_cast<size_t>(t) * 3u + 2u] = { cof[6], cof[7], cof[8], 0.0f };
     }
-    pack.TetBatchOrder = body.TetBatches.OrderedOrdinals;
+    pack.TetBatchOrder.resize(body.TetBatches.OrderedOrdinals.size());
+    if (!body.TetBatches.OrderedOrdinals.empty())
+    {
+        std::copy(body.TetBatches.OrderedOrdinals.begin(),
+                  body.TetBatches.OrderedOrdinals.end(),
+                  pack.TetBatchOrder.begin());
+    }
 
     pack.TotalUploadBytes =
         static_cast<uint64_t>(pack.PositionsInvMass.size()) * 16ull +
@@ -138,7 +156,14 @@ DeformableGpuBufferPack DeformableGpuDispatch::PackBodyForGpu(
         static_cast<uint64_t>(pack.TetElements.size()) * sizeof(TetElementGpuRecord) +
         static_cast<uint64_t>(pack.TetBatchOrder.size()) * sizeof(uint32_t) +
         static_cast<uint64_t>(pack.TetCofactorCols.size()) * 16ull;
+}
 
+DeformableGpuBufferPack DeformableGpuDispatch::PackBodyForGpu(
+    const DeformableBody& body,
+    const DeformableSimulationConfiguration& configuration)
+{
+    DeformableGpuBufferPack pack {};
+    PackBodyForGpuInto(body, configuration, pack);
     return pack;
 }
 
@@ -170,17 +195,21 @@ bool DeformableGpuDispatch::UnpackPositionsFromGpu(
     return true;
 }
 
-DeformableSubstepDispatchPlan DeformableGpuDispatch::BuildTickDispatchPlan(
+void DeformableGpuDispatch::BuildTickDispatchPlanInto(
     const DeformableBody& body,
     const DeformableSimulationConfiguration& configuration,
+    DeformableSubstepDispatchPlan& plan,
     bool appendVatSliceBake,
     uint32_t highPolyVertexCount)
 {
-    DeformableSubstepDispatchPlan plan {};
-    plan.Substeps = std::max(1u, configuration.Substeps);
+    plan.Substeps           = std::max(1u, configuration.Substeps);
+    plan.TotalDispatchCount = 0u;
+    plan.TotalBarrierCount  = 0u;
+    plan.Steps.clear();
+
     if (body.PointCount == 0u)
     {
-        return plan;
+        return;
     }
 
     const auto pushStep = [&](DeformableComputePassOrdinal pass, uint32_t sub, uint32_t color, uint32_t start, uint32_t count)
@@ -231,7 +260,16 @@ DeformableSubstepDispatchPlan DeformableGpuDispatch::BuildTickDispatchPlan(
     {
         pushStep(DeformableComputePassOrdinal::VatSliceBake, plan.Substeps - 1u, 0u, 0u, highPolyVertexCount);
     }
+}
 
+DeformableSubstepDispatchPlan DeformableGpuDispatch::BuildTickDispatchPlan(
+    const DeformableBody& body,
+    const DeformableSimulationConfiguration& configuration,
+    bool appendVatSliceBake,
+    uint32_t highPolyVertexCount)
+{
+    DeformableSubstepDispatchPlan plan {};
+    BuildTickDispatchPlanInto(body, configuration, plan, appendVatSliceBake, highPolyVertexCount);
     return plan;
 }
 

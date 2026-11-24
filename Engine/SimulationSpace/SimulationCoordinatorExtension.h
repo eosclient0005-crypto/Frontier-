@@ -90,6 +90,12 @@ public:
 
     [[nodiscard]] bool QueryInitialized() const noexcept { return Initialized_; }
     [[nodiscard]] bool QuerySuspended() const noexcept { return Suspended_; }
+    void               SetShouldUpdate(bool shouldUpdate) noexcept { ShouldUpdate_ = shouldUpdate; }
+    [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
+
+#if FRONTIER_FLUID_HAS_VULKAN
+    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+#endif
 
     // Cross-domain scene authoring & external state sync
     void AssignCameraWorldPosition(const std::array<float, 3>& cameraPositionMeters) noexcept;
@@ -116,6 +122,9 @@ public:
     [[nodiscard]] Deformable::DeformableExtension&           AccessDeformables() noexcept { return Deformables_; }
     [[nodiscard]] const Deformable::DeformableExtension&     InspectDeformables() const noexcept { return Deformables_; }
 
+    [[nodiscard]] const Fluid::FluidVulkanGpuExecutor&         InspectFluidGpuExecutor() const noexcept { return FluidGpuExecutor_; }
+    [[nodiscard]] const ParticleSpace::ParticleVulkanGpuExecutor& InspectParticleGpuExecutor() const noexcept { return ParticleGpuExecutor_; }
+
     [[nodiscard]] std::span<const PhysicsSpace::RigidImpulseAccumulatorEntry> InspectRigidImpulseFeedback() const noexcept
     {
         return RigidFeedback_;
@@ -124,22 +133,27 @@ public:
     [[nodiscard]] const SimulationCoordinatorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
 
 private:
-    SimulationCoordinatorParameters                           Parameters_      {};
-    ForceFields::ForceFieldRegister                           ForceRegister_   {};
-    Fluid::FluidCpuSimulationState                            FluidSim_        {};
-    std::vector<Fluid::FluidReleaseSourceParameters>          FluidSources_    {};
-    ParticleSpace::CarrierSolidRegistry                       SolidRegistry_   {};
-    ParticleSpace::ParticleGpuSimulation                      ParticleSim_     {};
-    std::vector<ParticleSpace::ParticleCloudNode>             ParticleClouds_  {};
-    Deformable::DeformableExtension                           Deformables_     {};
-    std::vector<PhysicsSpace::RigidColliderProxy>             RigidProxies_    {};
-    std::vector<Fluid::FluidColliderSphere>                   FluidColliders_  {};
-    std::vector<PhysicsSpace::RigidImpulseAccumulatorEntry>   RigidFeedback_   {};
-    std::array<float, 3>                                      CameraWorldPos_  { 0.0f, 2.0f, 6.0f };
-    double                                                    StepAccumulator_ = 0.0;
-    SimulationCoordinatorTelemetry                            Telemetry_       {};
-    bool                                                      Initialized_     = false;
-    bool                                                      Suspended_       = false;
+    static std::array<float, 3> SampleFluidVelocityThunk(const void* userContext, const std::array<float, 3>& worldPosition) noexcept;
+
+    SimulationCoordinatorParameters                           Parameters_          {};
+    ForceFields::ForceFieldRegister                           ForceRegister_       {};
+    Fluid::FluidCpuSimulationState                            FluidSim_            {};
+    Fluid::FluidVulkanGpuExecutor                             FluidGpuExecutor_    {};
+    std::vector<Fluid::FluidReleaseSourceParameters>          FluidSources_        {};
+    ParticleSpace::CarrierSolidRegistry                       SolidRegistry_       {};
+    ParticleSpace::ParticleGpuSimulation                      ParticleSim_         {};
+    ParticleSpace::ParticleVulkanGpuExecutor                  ParticleGpuExecutor_ {};
+    std::vector<ParticleSpace::ParticleCloudNode>             ParticleClouds_      {};
+    Deformable::DeformableExtension                           Deformables_         {};
+    std::vector<PhysicsSpace::RigidColliderProxy>             RigidProxies_        {};
+    std::vector<Fluid::FluidColliderSphere>                   FluidColliders_      {};
+    std::vector<PhysicsSpace::RigidImpulseAccumulatorEntry>   RigidFeedback_       {};
+    std::array<float, 3>                                      CameraWorldPos_      { 0.0f, 2.0f, 6.0f };
+    double                                                    StepAccumulator_     = 0.0;
+    SimulationCoordinatorTelemetry                            Telemetry_           {};
+    bool                                                      Initialized_         = false;
+    bool                                                      Suspended_           = false;
+    bool                                                      ShouldUpdate_        = true;
 };
 
 static_assert(Lifecycle::SuspendableParticipant<SimulationCoordinatorExtension>,

@@ -10,13 +10,23 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
+#include "Engine/SimulationSpace/AsyncGpuReadbackRing.h"
 #include "Engine/SimulationSpace/Fluid/FluidRegionTypes.h"
 #include "Engine/SimulationSpace/Fluid/SparseTileBank.h"
 #include "Engine/SimulationSpace/ForceFields/ForceFieldSampler.h"
 #include "Engine/SimulationSpace/ForceFields/ForceModelTypes.h"
 
+#if __has_include(<volk.h>)
+#define FRONTIER_FLUID_HAS_VULKAN 1
+#include "Engine/GeometricRaster/Compute/ComputeDispatchEncoder.h"
+#include "Engine/GeometricRaster/VulkanInterchange.h"
+#else
+#define FRONTIER_FLUID_HAS_VULKAN 0
+#endif
+
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <span>
 #include <string>
 #include <vector>
@@ -326,5 +336,139 @@ bool RelocateFluidSimulationCpu(
     const FluidVolumeUniformBlock& volume,
     const FluidVolumeGridCpu& velocity,
     uint32_t interiorMargin = 2u) noexcept;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                              REAL ASYNC VULKAN 1.2 FLUID GPU EXECUTOR (MERGE-PREP U03)
+//------------------------------------------------------------------------------------------------------------------------
+
+enum class FluidExecutionRoute : uint8_t
+{
+    HeadlessCpuMirror = 0u, // Headless CPU fallback ONLY when VulkanInterchange is unavailable/unready
+    VulkanComputeGpu  = 1u  // Real Async Vulkan 1.2 3D texture vkCmdDispatch execution (zero mid-frame stalls)
+};
+
+struct FluidGpuExecutorTelemetry
+{
+    FluidExecutionRoute Route                  = FluidExecutionRoute::HeadlessCpuMirror;
+    uint32_t            ActiveRingSlot         = 0u;
+    uint64_t            CompletedTicks         = 0ull;
+    uint64_t            TotalDispatches        = 0ull;
+    uint64_t            LastSubmittedTimeline  = 0ull;
+    uint64_t            AllocatedImageBytes    = 0ull;
+    bool                RealGpuDispatched      = false;
+};
+
+/// Real Async Vulkan 1.2 3D Eulerian + Sparse Fluid GPU executor using VulkanInterchange::AllocateImage3D +
+/// isolated ComputeDispatchEncoder + DispatchCommandBufferAsync + 3-slot non-blocking AsyncGpuReadbackRing
+/// for sparse occupancy readback (zero vkDeviceWaitIdle / vkQueueWaitIdle / vkWaitForFences / AwaitTimelineTick).
+class FluidVulkanGpuExecutor
+{
+public:
+    static constexpr uint32_t kTripleBufferSlots    = 3u;
+    static constexpr uint32_t kMaxOccupancyFloat4s  = 3u * 256u;
+
+    FluidVulkanGpuExecutor() = default;
+    ~FluidVulkanGpuExecutor();
+
+    FluidVulkanGpuExecutor(const FluidVulkanGpuExecutor&)            = delete;
+    FluidVulkanGpuExecutor& operator=(const FluidVulkanGpuExecutor&) = delete;
+
+#if FRONTIER_FLUID_HAS_VULKAN
+    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] VkImageView QueryVelocityImageView() const noexcept { return ImgVelocity_[ActivePong_].ViewHandle; }
+    [[nodiscard]] VkImageView QueryStateImageView() const noexcept    { return ImgState_[ActivePong_].ViewHandle; }
+#endif
+
+    [[nodiscard]] bool Initialize(
+        const std::array<uint32_t, 3>& gridCells,
+        float cellSizeMeters,
+        const std::array<float, 3>& centreMeters,
+        const std::filesystem::path& compiledShaderDirectory = "CompiledShaders");
+
+    void Teardown() noexcept;
+
+    /// Executes one fluid step: dispatches real Vulkan 1.2 3D compute shaders asynchronously when GPU-backed
+    /// (ZERO StepFluidSimulationCpu call on live hardware GPU), or runs headless CPU fallback when unbacked.
+    void ExecuteStep(
+        FluidCpuSimulationState& headlessFallbackState,
+        const FluidStepSettings& settings,
+        std::span<const FluidReleaseSourceParameters> sources,
+        std::span<const Frontier::SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+        std::span<const FluidColliderSphere> colliders,
+        float deltaTimeSeconds);
+
+    /// Non-blocking poll of the 3-slot sparse occupancy readback ring (1-2 frames latency, zero stall).
+    [[nodiscard]] bool PollAsyncOccupancyReadback() noexcept;
+    [[nodiscard]] std::span<const std::array<float, 4>> InspectCompletedOccupancy() const noexcept
+    {
+        return OccupancyReadbackRing_.InspectLatestCompleted();
+    }
+
+    [[nodiscard]] bool Ready() const noexcept { return Initialized_; }
+    [[nodiscard]] const FluidGpuExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
+
+private:
+    std::array<uint32_t, 3> GridCells_       { 16u, 16u, 16u };
+    float                   CellSizeMeters_  = 0.22f;
+    std::array<float, 3>    CentreMeters_    { 0.0f, 1.75f, 0.0f };
+    double                  SimTime_         = 0.0;
+    FluidGpuExecutorTelemetry Telemetry_     {};
+    AsyncGpuReadbackRing<std::array<float, 4>, kTripleBufferSlots> OccupancyReadbackRing_ {};
+    std::vector<std::array<float, 4>> ScratchOccupancy_ {};
+    bool                    Initialized_     = false;
+    bool                    GpuLiveReady_    = false;
+
+#if FRONTIER_FLUID_HAS_VULKAN
+    struct PendingCmd
+    {
+        VkCommandBuffer CmdBuffer      = VK_NULL_HANDLE;
+        uint64_t        TimelineSignal = 0ull;
+    };
+
+    void RetireCompletedCommandBuffersNonBlocking() noexcept;
+    [[nodiscard]] bool InitializeGpuResources(const std::filesystem::path& shaderDir);
+    void ReleaseGpuResources() noexcept;
+    void DispatchGpuAsync(
+        const FluidStepSettings& settings,
+        std::span<const FluidReleaseSourceParameters> sources,
+        std::span<const Frontier::SimulationSpace::ForceFields::ForceModelGpuRecord> forceRecords,
+        std::span<const FluidColliderSphere> colliders,
+        float deltaTimeSeconds) noexcept;
+
+    GeometricRaster::VulkanInterchange*                   Interchange_       = nullptr;
+    GeometricRaster::ComputeDispatchEncoder               Encoder_           {};
+    VkSampler                                             LinearSampler_     = VK_NULL_HANDLE;
+    uint32_t                                              ActivePong_        = 0u;
+    uint32_t                                              ProgInject_        = 0u;
+    uint32_t                                              ProgAdvect_        = 0u;
+    uint32_t                                              ProgMacCormack_    = 0u;
+    uint32_t                                              ProgThermo_        = 0u;
+    uint32_t                                              ProgForces_        = 0u;
+    uint32_t                                              ProgCurl_          = 0u;
+    uint32_t                                              ProgVorticity_     = 0u;
+    uint32_t                                              ProgDivergence_    = 0u;
+    uint32_t                                              ProgPressure_      = 0u;
+    uint32_t                                              ProgGradient_      = 0u;
+    uint32_t                                              ProgOccupancy_     = 0u;
+    std::array<GeometricRaster::DeviceImageResource, 2>   ImgVelocity_       {};
+    std::array<GeometricRaster::DeviceImageResource, 2>   ImgState_          {};
+    std::array<GeometricRaster::DeviceImageResource, 2>   ImgPressure_       {};
+    GeometricRaster::DeviceImageResource                  ImgCurl_           {};
+    GeometricRaster::DeviceImageResource                  ImgDivergence_     {};
+    GeometricRaster::DeviceImageResource                  ImgScratchA_       {};
+    GeometricRaster::DeviceImageResource                  ImgScratchB_       {};
+    GeometricRaster::DeviceBufferResource                 BufForceRecords_   {};
+    GeometricRaster::DeviceBufferResource                 BufOccupancy_      {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufInjectUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufAdvectUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufThermoUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufForcesUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufVortUbo_     {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDivUbo_      {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufPressUbo_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufGradUbo_     {};
+    std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
+#endif
+};
 
 } // namespace Frontier::SimulationSpace::Fluid

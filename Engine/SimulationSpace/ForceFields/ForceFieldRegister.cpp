@@ -465,7 +465,44 @@ uint32_t ForceFieldRegister::PublishEvaluatedReading(
             for (const ManagedForceEntry& entry : Entries)
             {
                 if (count >= effectiveCap) break;
-                const ForceModelNode keyed = EvaluateKeyedForceNode(entry, simulationSeconds);
+                const ForceModelNode* evalPtr = &entry.Node;
+                ForceModelNode scratchNode {};
+                if (!entry.Tracks.empty())
+                {
+                    // Copy POD parameters only (omit std::string NodeId/Name -> zero heap allocation per tick)
+                    scratchNode.ModelCode      = entry.Node.ModelCode;
+                    scratchNode.Falloff        = entry.Node.Falloff;
+                    scratchNode.Enabled        = entry.Node.Enabled;
+                    scratchNode.PositionMeters = entry.Node.PositionMeters;
+                    scratchNode.Direction      = entry.Node.Direction;
+                    scratchNode.Strength       = entry.Node.Strength;
+                    scratchNode.RadiusMeters   = entry.Node.RadiusMeters;
+                    scratchNode.Frequency      = entry.Node.Frequency;
+                    scratchNode.Secondary      = entry.Node.Secondary;
+                    scratchNode.Tertiary       = entry.Node.Tertiary;
+                    scratchNode.StartTimeSec   = entry.Node.StartTimeSec;
+                    scratchNode.DurationSec    = entry.Node.DurationSec;
+                    scratchNode.FadeSec        = entry.Node.FadeSec;
+                    scratchNode.RepeatSec      = entry.Node.RepeatSec;
+                    scratchNode.TargetChannels = entry.Node.TargetChannels;
+                    for (const KeyTrack& track : entry.Tracks)
+                    {
+                        if (track.Path == "Weight" || track.Keys.empty()) continue;
+                        const bool isStepped = (track.Path == "Enabled" || track.Path == "Falloff");
+                        const auto sampled = SampleKeyTrack(track, simulationSeconds, isStepped);
+                        if (!sampled.has_value()) continue;
+                        if (track.Path == "Position")       scratchNode.PositionMeters = ReadVec3FromKeyValue(*sampled, scratchNode.PositionMeters);
+                        else if (track.Path == "Direction") scratchNode.Direction      = ReadVec3FromKeyValue(*sampled, scratchNode.Direction);
+                        else if (track.Path == "Strength")  scratchNode.Strength       = static_cast<float>(ReadScalarFromKeyValue(*sampled, scratchNode.Strength));
+                        else if (track.Path == "Radius")    scratchNode.RadiusMeters   = std::max(0.05f, static_cast<float>(ReadScalarFromKeyValue(*sampled, scratchNode.RadiusMeters)));
+                        else if (track.Path == "Frequency") scratchNode.Frequency      = static_cast<float>(ReadScalarFromKeyValue(*sampled, scratchNode.Frequency));
+                        else if (track.Path == "Secondary") scratchNode.Secondary      = static_cast<float>(ReadScalarFromKeyValue(*sampled, scratchNode.Secondary));
+                        else if (track.Path == "Tertiary")  scratchNode.Tertiary       = static_cast<float>(ReadScalarFromKeyValue(*sampled, scratchNode.Tertiary));
+                        else if (track.Path == "Enabled")   scratchNode.Enabled        = ReadBoolFromKeyValue(*sampled, scratchNode.Enabled);
+                    }
+                    evalPtr = &scratchNode;
+                }
+                const ForceModelNode& keyed = *evalPtr;
                 if (!keyed.Enabled) continue;
                 const float envelope = EvaluateForceNodeWeight(entry, simulationSeconds);
                 reading.Records[count] = PackForceModelGpuRecord(keyed, envelope);

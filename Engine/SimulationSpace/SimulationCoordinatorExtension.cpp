@@ -48,12 +48,19 @@ bool SimulationCoordinatorExtension::Initialize() noexcept
                 Parameters_.FluidGridCells,
                 Parameters_.FluidCellSizeMeters,
                 Parameters_.FluidCentreMeters);
+            (void)FluidGpuExecutor_.Initialize(
+                Parameters_.FluidGridCells,
+                Parameters_.FluidCellSizeMeters,
+                Parameters_.FluidCentreMeters);
         }
 
         if (Parameters_.EnableParticleSolver)
         {
             ParticleSim_.ClearAll();
+            (void)ParticleGpuExecutor_.Initialize(4096u);
         }
+
+        RigidFeedback_.reserve(128u);
 
         if (Parameters_.EnableDeformableSolver)
         {
@@ -79,7 +86,8 @@ bool SimulationCoordinatorExtension::Initialize() noexcept
 
 void SimulationCoordinatorExtension::Tick(double deltaSeconds) noexcept
 {
-    if (!Initialized_ || Suspended_ || deltaSeconds <= 0.0)
+    // 0.00 ms fast-skip for idle / Edit-mode frames
+    if (!Initialized_ || Suspended_ || !ShouldUpdate_ || deltaSeconds <= 0.0)
     {
         return;
     }
@@ -104,27 +112,35 @@ void SimulationCoordinatorExtension::Tick(double deltaSeconds) noexcept
             const auto forceLease = ForceRegister_.AcquirePublishedReading();
             const std::span<const ForceFields::ForceModelGpuRecord> activeForces = forceLease->ActiveSpan();
 
-            // 2. 3D Eulerian Fluid Solver driven by shared ForceFields & Jolt collider spheres
+            // 2. 3D Eulerian Fluid Solver (Real Async Vulkan 1.2 Compute on GPU, headless CPU fallback otherwise)
             if (Parameters_.EnableFluidSolver)
             {
-                Fluid::StepFluidSimulationCpu(
+                FluidGpuExecutor_.ExecuteStep(
                     FluidSim_,
                     Parameters_.FluidSettings,
                     FluidSources_,
                     activeForces,
                     FluidColliders_,
                     dtF);
-                Telemetry_.FluidStepCount = FluidSim_.StepCount;
+                Telemetry_.FluidStepCount = FluidGpuExecutor_.InspectTelemetry().CompletedTicks;
 
-                float peakD = 0.0f;
-                for (const auto& cell : FluidSim_.State.Cells)
+                if (!FluidGpuExecutor_.InspectTelemetry().RealGpuDispatched)
                 {
-                    peakD = std::max(peakD, cell[0]);
+                    float peakD = 0.0f;
+                    for (const auto& cell : FluidSim_.State.Cells)
+                    {
+                        peakD = std::max(peakD, cell[0]);
+                    }
+                    Telemetry_.FluidPeakDensity = peakD;
                 }
-                Telemetry_.FluidPeakDensity = peakD;
+                else
+                {
+                    const auto occ = FluidGpuExecutor_.InspectCompletedOccupancy();
+                    Telemetry_.FluidPeakDensity = occ.empty() ? 0.0f : occ[0][0];
+                }
             }
 
-            // 3. ParticleSpace coupled to BOTH shared ForceFields AND live 3D Fluid velocity field
+            // 3. ParticleSpace coupled to BOTH ForceFields & Fluid (zero-allocation GasVelocitySamplerView!)
             if (Parameters_.EnableParticleSolver && !ParticleClouds_.empty())
             {
                 ParticleSpace::ParticleSimulationRegion region {};
@@ -135,21 +151,26 @@ void SimulationCoordinatorExtension::Tick(double deltaSeconds) noexcept
                     0.5f * static_cast<float>(Parameters_.FluidGridCells[2]) * Parameters_.FluidCellSizeMeters
                 };
 
-                auto gasQuery = [this](const std::array<float, 3>& worldPos) -> std::array<float, 3>
+                ParticleSpace::GasVelocitySamplerView gasView {};
+                if (Parameters_.EnableFluidSolver)
                 {
-                    return this->SampleFluidVelocityWorld(worldPos);
-                };
+                    gasView.Callback    = &SimulationCoordinatorExtension::SampleFluidVelocityThunk;
+                    gasView.UserContext = this;
+                }
 
-                ParticleSim_.StepCloudsCpu(
+                ParticleGpuExecutor_.ExecuteStep(
+                    ParticleSim_,
                     ParticleClouds_,
                     SolidRegistry_,
                     region,
                     simT,
                     dtF,
                     activeForces,
-                    Parameters_.EnableFluidSolver ? ParticleSpace::GasVelocityQueryFn(gasQuery) : ParticleSpace::GasVelocityQueryFn {});
+                    gasView);
 
-                Telemetry_.ActiveParticleCount = ParticleSim_.QueryStatistics().ActiveParticleCount;
+                Telemetry_.ActiveParticleCount = ParticleGpuExecutor_.InspectTelemetry().RealGpuDispatched
+                    ? ParticleClouds_[0].Evaluated.Count
+                    : ParticleSim_.QueryStatistics().ActiveParticleCount;
             }
 
             // 4. Deformables (world .SoftBody instances + 4-wheel vehicle) coupled to shared ForceFields & Jolt RigidColliderProxies
@@ -218,6 +239,8 @@ void SimulationCoordinatorExtension::Resume() noexcept
 void SimulationCoordinatorExtension::Finalize() noexcept
 {
     Deformables_.Finalize();
+    FluidGpuExecutor_.Teardown();
+    ParticleGpuExecutor_.Teardown();
     ParticleSim_.ClearAll();
     ForceRegister_.Clear();
     FluidSources_.clear();
@@ -229,6 +252,22 @@ void SimulationCoordinatorExtension::Finalize() noexcept
     Suspended_       = false;
     Initialized_     = false;
 }
+
+std::array<float, 3> SimulationCoordinatorExtension::SampleFluidVelocityThunk(
+    const void* userContext,
+    const std::array<float, 3>& worldPosition) noexcept
+{
+    return static_cast<const SimulationCoordinatorExtension*>(userContext)->SampleFluidVelocityWorld(worldPosition);
+}
+
+#if FRONTIER_FLUID_HAS_VULKAN
+bool SimulationCoordinatorExtension::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+{
+    const bool fluidOk    = FluidGpuExecutor_.AttachVulkanInterchange(interchange);
+    const bool particleOk = ParticleGpuExecutor_.AttachVulkanInterchange(interchange);
+    return fluidOk && particleOk;
+}
+#endif
 
 void SimulationCoordinatorExtension::AssignCameraWorldPosition(const std::array<float, 3>& cameraPositionMeters) noexcept
 {

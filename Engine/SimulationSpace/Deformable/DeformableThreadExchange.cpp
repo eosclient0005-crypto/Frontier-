@@ -25,7 +25,11 @@ DeformableThreadExchange::DeformableThreadExchange(DeformablePresetKind initialP
     : Boundary_(Threading::DefaultBoundaryDirectiveCapacity)
 {
     DeformablePresetRegistry::BuildPreset(initialPreset, Body_, Configuration_);
-    PublishCurrentReading();
+    // Pre-seed all wait-free reading bank slots so live Tick() publishes perform 0 heap allocations.
+    for (uint32_t slot = 0u; slot < Threading::DefaultReadingBankSlots; ++slot)
+    {
+        PublishCurrentReading();
+    }
 }
 
 bool DeformableThreadExchange::EnqueueDirective(DeformableControlDirective directive) noexcept
