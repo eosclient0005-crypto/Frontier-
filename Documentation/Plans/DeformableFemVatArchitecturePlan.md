@@ -111,11 +111,15 @@ Frontier/
 
 | Phase | Scope | Status |
 | :--- | :--- | :--- |
-| **`D01`** | `DeformableTypes.h`, `TetrahedralSolidBuilder.{h,cpp}`, `ConflictColorPartitioner.{h,cpp}` + unit compile/test | In Progress |
-| **`D02`** | `NeoHookeanTetSolver.{h,cpp}`, `XpbdConstraintSolver.{h,cpp}` + Poisson/tear verification | Queued |
-| **`D03`** | `PneumaticTireSolver.{h,cpp}`, `DeformablePhysicsCoupling.{h,cpp}`, `DeformablePresetRegistry.{h,cpp}` (all 9 presets) | Queued |
-| **`D04`** | `CageWeightTypes.h`, `TireSurfaceBuilder.{h,cpp}`, `TetrahedralCageEmbedder.{h,cpp}`, `SurfaceQuadCageEmbedder.{h,cpp}` | Queued |
-| **`D05`** | `VertexMotionAtlasTypes.h`, `VertexMotionAtlasBaker.{h,cpp}`, `VertexMotionAtlasPlayer.{h,cpp}`, `VertexMotionAtlasExporter.{h,cpp}` | Queued |
-| **`D06`** | All 8 `.slang` shaders under `Engine/Shaders/Deformable/` + ABI parity check | Queued |
-| **`D07`** | `SuffixRegistry` (`.SoftBody`, `.VertexAtlas`), `SoftBodyCodec.{h,cpp}`, `VertexAtlasCodec.{h,cpp}`, all 9 `EngineContent/Simulation/Deformables/*.SoftBody` files | Queued |
-| **`D08`** | `Exhibits/DeformableSolverValidation.cpp`, `Exhibits/VertexMotionAtlasValidation.cpp`, `CMakeLists.txt`, full CTest & banned-word audit | Queued |
+| **`D01`** | `DeformableTypes.h`, `TetrahedralSolidBuilder.{h,cpp}`, `ConflictColorPartitioner.{h,cpp}` + unit compile/test | ✅ Complete (`a832c98`) |
+| **`D02`** | `NeoHookeanTetSolver.{h,cpp}`, `XpbdConstraintSolver.{h,cpp}` + Poisson/tear verification | ✅ Complete (`a832c98`) |
+| **`D03`** | `PneumaticTireSolver.{h,cpp}`, `DeformablePhysicsCoupling.{h,cpp}`, `DeformablePresetRegistry.{h,cpp}` (all 9 presets) | ✅ Complete (`a832c98`) |
+| **`D04`** | `CageWeightTypes.h`, `TireSurfaceBuilder.{h,cpp}`, `TetrahedralCageEmbedder.{h,cpp}`, `SurfaceQuadCageEmbedder.{h,cpp}` | ✅ Complete (`a832c98`) |
+| **`D05`** | `VertexMotionAtlasTypes.h`, `VertexMotionAtlasBaker.{h,cpp}`, `VertexMotionAtlasPlayer.{h,cpp}`, `VertexMotionAtlasExporter.{h,cpp}` | ✅ Complete (`a832c98`) |
+| **`D06`** | All 8 `.slang` shaders under `Engine/Shaders/Deformable/` + ABI parity check | ✅ Complete (`a832c98`) |
+| **`D07`** | `SuffixRegistry` (`.SoftBody`, `.VertexAtlas`), `SoftBodyCodec.{h,cpp}`, `VertexAtlasCodec.{h,cpp}`, all 9 `EngineContent/Simulation/Deformables/*.SoftBody` files | ✅ Complete (`a832c98`) |
+| **`D08`** | `Exhibits/DeformableSolverValidation.cpp`, `Exhibits/VertexMotionAtlasValidation.cpp`, `CMakeLists.txt`, full CTest & banned-word audit | ✅ Complete (`a832c98`) |
+| **`D09`** | `Engine/GeometrySpace/Deformation/PolygonNetworkDeformer.{h,cpp}` — bidirectional Frontier `PolygonNetwork` <-> `HighPolySurfaceRest` / live cage & VAT deformation bridge | ✅ Complete |
+| **`D10`** | `Engine/SimulationSpace/Deformable/DeformableGpuDispatch.{h,cpp}` + `VertexMotionAtlasBakeCompute.slang` + `Engine/Shaders/Deformable/README.md` — 16B-aligned GPU SSBO packer, lock-free color-batch dispatch plan & GPU VAT bake compute shader | ✅ Complete |
+| **`D11`** | `Engine/SimulationSpace/Deformable/VehicleTireDeformBridge.{h,cpp}` — 4-wheel Jolt vehicle wheel-corner load/spin/thermal/curb bridge with distance-based Live FEM / Live XPBD / 0-CPU VAT LOD switching | ✅ Complete |
+| **`D12`** | `Engine/SimulationSpace/Deformable/DeformableThreadExchange.{h,cpp}` + `Exhibits/DeformableIntegrationValidation.cpp` + `CMakeLists.txt` — wait-free `ThreadBoundaryExchange` physics/render publication & end-to-end integration validation | ✅ Complete |
