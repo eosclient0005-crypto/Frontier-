@@ -1177,6 +1177,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/Deformable/DeformableExtension.cpp
     Engine/SimulationSpace/SimulationCoordinatorExtension.cpp
     Engine/SimulationSpace/SimulationSceneDocument.cpp
+    Engine/SimulationSpace/ComponentClassSimulationAssembler.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1487,6 +1488,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(DeformableRuntimeExtensionValidation      Exhibits/DeformableRuntimeExtensionValidation.cpp)
     frontier_register_exhibit(UnifiedSimulationCouplingValidation       Exhibits/UnifiedSimulationCouplingValidation.cpp)
     frontier_register_exhibit(SimulationSceneValidation                 Exhibits/SimulationSceneValidation.cpp)
+    frontier_register_exhibit(ComponentClassSimulationValidation        Exhibits/ComponentClassSimulationValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)

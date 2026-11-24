@@ -70,9 +70,13 @@ const char* QueryCategorySubtitle(
         case Cat::CameraInstance:   return "Camera";
         case Cat::CollisionVolume:  return "Box trigger";
         case Cat::DirectionArrow:   return "DirectionArrow";
-        case Cat::VehicleDynamics:   return "VehicleDynamics";
-        case Cat::RotationalMotion:  return "RotationalMotion";
-        case Cat::RigidBodyInstance: return "RigidBody";
+        case Cat::VehicleDynamics:       return "VehicleDynamics";
+        case Cat::RotationalMotion:      return "RotationalMotion";
+        case Cat::RigidBodyInstance:     return "RigidBody";
+        case Cat::SoftBodyInstance:      return "SoftBody";
+        case Cat::ForceFieldInstance:    return "ForceField";
+        case Cat::FluidRegionInstance:   return "FluidRegion";
+        case Cat::ParticleCloudInstance: return "ParticleCloud";
     }
     return "Component";
 }
@@ -107,8 +111,12 @@ ControlIcon QueryCategoryControlIcon(ComponentClass::ComponentCategory Cat) noex
         case C::CollisionVolume:    return ControlIcon::VolumeBoxes;
         case C::DirectionArrow:     return ControlIcon::MoveArrows;
         case C::VehicleDynamics:    return ControlIcon::GaugeRate;
-        case C::RotationalMotion:   return ControlIcon::RefreshCycle;
-        case C::RigidBodyInstance:  return ControlIcon::VolumeBoxes;
+        case C::RotationalMotion:      return ControlIcon::RefreshCycle;
+        case C::RigidBodyInstance:     return ControlIcon::VolumeBoxes;
+        case C::SoftBodyInstance:      return ControlIcon::CubeShape;
+        case C::ForceFieldInstance:    return ControlIcon::MoveArrows;
+        case C::FluidRegionInstance:   return ControlIcon::VolumeBoxes;
+        case C::ParticleCloudInstance: return ControlIcon::SunIllumination;
     }
     return ControlIcon::CubeShape;
 }

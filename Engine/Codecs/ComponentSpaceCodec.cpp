@@ -272,6 +272,47 @@ SpaceContainerPayload ComponentSpaceEncoder::ConstructPayload(
                     Entry.insert_or_assign("ContinuousMotion", RB->ContinuousMotion);
                 }
                 break;
+            case ComponentClass::ComponentCategory::SoftBodyInstance:
+                if (const auto* SB = Storage.InspectSoftBody(H.Token))
+                {
+                    Entry.insert_or_assign("SoftBodyAssetPath", SB->SoftBodyAssetPath);
+                    Entry.insert_or_assign("VertexAtlasPath", SB->VertexAtlasPath);
+                    Entry.insert_or_assign("SleepDistanceMeters", static_cast<double>(SB->SleepDistanceMeters));
+                }
+                break;
+            case ComponentClass::ComponentCategory::ForceFieldInstance:
+                if (const auto* FF = Storage.InspectForceField(H.Token))
+                {
+                    Entry.insert_or_assign("ModelCode", static_cast<int64_t>(FF->ModelCode));
+                    Entry.insert_or_assign("Direction", EncodeVec3(FF->Direction));
+                    Entry.insert_or_assign("Strength", static_cast<double>(FF->Strength));
+                    Entry.insert_or_assign("RadiusMeters", static_cast<double>(FF->RadiusMeters));
+                    Entry.insert_or_assign("FalloffCode", static_cast<int64_t>(FF->FalloffCode));
+                }
+                break;
+            case ComponentClass::ComponentCategory::FluidRegionInstance:
+                if (const auto* FL = Storage.InspectFluidRegion(H.Token))
+                {
+                    Entry.insert_or_assign("RadiusMeters", static_cast<double>(FL->RadiusMeters));
+                    Entry.insert_or_assign("VelocityMps", EncodeVec3(FL->VelocityMps));
+                    Entry.insert_or_assign("Density", static_cast<double>(FL->Density));
+                    Entry.insert_or_assign("Temperature", static_cast<double>(FL->Temperature));
+                    Entry.insert_or_assign("Fuel", static_cast<double>(FL->Fuel));
+                }
+                break;
+            case ComponentClass::ComponentCategory::ParticleCloudInstance:
+                if (const auto* PC = Storage.InspectParticleCloud(H.Token))
+                {
+                    Entry.insert_or_assign("RadiusMeters", static_cast<double>(PC->RadiusMeters));
+                    Entry.insert_or_assign("ParticleCount", static_cast<int64_t>(PC->ParticleCount));
+                    Entry.insert_or_assign("ReleaseRate", static_cast<double>(PC->ReleaseRate));
+                    Entry.insert_or_assign("SpeedMps", static_cast<double>(PC->SpeedMps));
+                    Entry.insert_or_assign("LifetimeSec", static_cast<double>(PC->LifetimeSec));
+                    Entry.insert_or_assign("GravityY", static_cast<double>(PC->GravityY));
+                    Entry.insert_or_assign("GasInfluence", static_cast<double>(PC->GasInfluence));
+                    Entry.insert_or_assign("FieldInfluence", static_cast<double>(PC->FieldInfluence));
+                }
+                break;
             case ComponentClass::ComponentCategory::SpatialOrigin:
             case ComponentClass::ComponentCategory::TransformPivot:
                 break;
@@ -570,6 +611,47 @@ bool ComponentSpaceDecoder::ExtractDefinition(
                     RB->FreezeAxisMask      = static_cast<uint8_t>((*Entry)["FreezeAxisMask"].value_or<int64_t>(0));
                     RB->AllowSleep          = (*Entry)["AllowSleep"].value_or(true);
                     RB->ContinuousMotion    = (*Entry)["ContinuousMotion"].value_or(false);
+                }
+                break;
+            case ComponentClass::ComponentCategory::SoftBodyInstance:
+                if (auto* SB = OutDefinition.Storage.ResolveSoftBody(Token))
+                {
+                    SB->SoftBodyAssetPath   = (*Entry)["SoftBodyAssetPath"].value_or(std::string("EngineContent/Simulation/Deformables/WovenCloth.SoftBody"));
+                    SB->VertexAtlasPath     = (*Entry)["VertexAtlasPath"].value_or(std::string());
+                    SB->SleepDistanceMeters = static_cast<float>((*Entry)["SleepDistanceMeters"].value_or(60.0));
+                }
+                break;
+            case ComponentClass::ComponentCategory::ForceFieldInstance:
+                if (auto* FF = OutDefinition.Storage.ResolveForceField(Token))
+                {
+                    FF->ModelCode    = static_cast<uint8_t>((*Entry)["ModelCode"].value_or<int64_t>(0));
+                    FF->Direction    = DecodeVec3((*Entry)["Direction"].as_array(), { 1.0f, 0.0f, 0.0f });
+                    FF->Strength     = static_cast<float>((*Entry)["Strength"].value_or(4.0));
+                    FF->RadiusMeters = static_cast<float>((*Entry)["RadiusMeters"].value_or(8.0));
+                    FF->FalloffCode  = static_cast<uint8_t>((*Entry)["FalloffCode"].value_or<int64_t>(3));
+                }
+                break;
+            case ComponentClass::ComponentCategory::FluidRegionInstance:
+                if (auto* FL = OutDefinition.Storage.ResolveFluidRegion(Token))
+                {
+                    FL->RadiusMeters = static_cast<float>((*Entry)["RadiusMeters"].value_or(0.42));
+                    FL->VelocityMps  = DecodeVec3((*Entry)["VelocityMps"].as_array(), { 0.0f, 2.2f, 0.0f });
+                    FL->Density      = static_cast<float>((*Entry)["Density"].value_or(1.5));
+                    FL->Temperature  = static_cast<float>((*Entry)["Temperature"].value_or(2.6));
+                    FL->Fuel         = static_cast<float>((*Entry)["Fuel"].value_or(1.1));
+                }
+                break;
+            case ComponentClass::ComponentCategory::ParticleCloudInstance:
+                if (auto* PC = OutDefinition.Storage.ResolveParticleCloud(Token))
+                {
+                    PC->RadiusMeters   = static_cast<float>((*Entry)["RadiusMeters"].value_or(0.36));
+                    PC->ParticleCount  = static_cast<uint32_t>((*Entry)["ParticleCount"].value_or<int64_t>(256));
+                    PC->ReleaseRate    = static_cast<float>((*Entry)["ReleaseRate"].value_or(12.0));
+                    PC->SpeedMps       = static_cast<float>((*Entry)["SpeedMps"].value_or(1.5));
+                    PC->LifetimeSec    = static_cast<float>((*Entry)["LifetimeSec"].value_or(2.4));
+                    PC->GravityY       = static_cast<float>((*Entry)["GravityY"].value_or(0.15));
+                    PC->GasInfluence   = static_cast<float>((*Entry)["GasInfluence"].value_or(0.85));
+                    PC->FieldInfluence = static_cast<float>((*Entry)["FieldInfluence"].value_or(0.85));
                 }
                 break;
             case ComponentClass::ComponentCategory::SpatialOrigin:
