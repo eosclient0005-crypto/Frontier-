@@ -90,8 +90,12 @@ ColorRgba QueryCategoryAccentTint(ComponentClass::ComponentCategory Cat) noexcep
         case C::ConstraintInstance: return { 100u, 182u, 255u, 255u };
         case C::LightInstance:      return { 255u, 210u, 110u, 255u };
         case C::CollisionVolume:    return { 255u, 178u,  56u, 255u };
-        case C::RigidBodyInstance:  return { 118u, 196u, 232u, 255u };
-        case C::VehicleDynamics:    return {  88u, 214u, 141u, 255u };
+        case C::RigidBodyInstance:     return { 118u, 196u, 232u, 255u };
+        case C::SoftBodyInstance:      return { 172u, 134u, 248u, 255u };
+        case C::ForceFieldInstance:    return {  96u, 218u, 208u, 255u };
+        case C::FluidRegionInstance:   return { 255u, 146u,  92u, 255u };
+        case C::ParticleCloudInstance: return { 255u, 202u,  88u, 255u };
+        case C::VehicleDynamics:       return {  88u, 214u, 141u, 255u };
         case C::CameraInstance:     return { 144u, 184u, 255u, 255u };
         default:                    return { 176u, 180u, 190u, 255u };
     }
@@ -476,25 +480,30 @@ void ComponentTreePanel::Render(
             ComponentClass::PhysicsConstraintCategory ConCategory;
             bool                                  HeaderOnly;
         };
-        static constexpr std::array<AddDirectiveSpec, 10> Specs {{
-            { "SCENE & CONSTRAINTS", ComponentClass::ComponentCategory::SpatialOrigin,      ComponentClass::PhysicsConstraintCategory::Fixed,  true  },
-            { "Geometry Instance",   ComponentClass::ComponentCategory::GeometryInstance,   ComponentClass::PhysicsConstraintCategory::Fixed,  false },
-            { "Spring Constraint",   ComponentClass::ComponentCategory::ConstraintInstance, ComponentClass::PhysicsConstraintCategory::Spring, false },
-            { "Hinge Constraint",    ComponentClass::ComponentCategory::ConstraintInstance, ComponentClass::PhysicsConstraintCategory::Hinge,  false },
-            { "Dock Constraint",     ComponentClass::ComponentCategory::ConstraintInstance, ComponentClass::PhysicsConstraintCategory::Dock,   false },
-            { "SpotBeam Light",      ComponentClass::ComponentCategory::LightInstance,      ComponentClass::PhysicsConstraintCategory::Fixed,  false },
-            { "Box Collider",        ComponentClass::ComponentCategory::CollisionVolume,    ComponentClass::PhysicsConstraintCategory::Fixed,  false },
-            { "Camera",              ComponentClass::ComponentCategory::CameraInstance,     ComponentClass::PhysicsConstraintCategory::Fixed,  false },
-            { "BEHAVIOURS",          ComponentClass::ComponentCategory::VehicleDynamics,    ComponentClass::PhysicsConstraintCategory::Fixed,  true  },
-            { "Vehicle Dynamics",    ComponentClass::ComponentCategory::VehicleDynamics,    ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+        static constexpr std::array<AddDirectiveSpec, 15> Specs {{
+            { "SCENE & CONSTRAINTS", ComponentClass::ComponentCategory::SpatialOrigin,         ComponentClass::PhysicsConstraintCategory::Fixed,  true  },
+            { "Geometry Instance",   ComponentClass::ComponentCategory::GeometryInstance,      ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "Spring Constraint",   ComponentClass::ComponentCategory::ConstraintInstance,    ComponentClass::PhysicsConstraintCategory::Spring, false },
+            { "Hinge Constraint",    ComponentClass::ComponentCategory::ConstraintInstance,    ComponentClass::PhysicsConstraintCategory::Hinge,  false },
+            { "Dock Constraint",     ComponentClass::ComponentCategory::ConstraintInstance,    ComponentClass::PhysicsConstraintCategory::Dock,   false },
+            { "SpotBeam Light",      ComponentClass::ComponentCategory::LightInstance,         ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "Box Collider",        ComponentClass::ComponentCategory::CollisionVolume,       ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "Camera",              ComponentClass::ComponentCategory::CameraInstance,        ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "SIMULATION",          ComponentClass::ComponentCategory::SoftBodyInstance,      ComponentClass::PhysicsConstraintCategory::Fixed,  true  },
+            { "Soft Body",           ComponentClass::ComponentCategory::SoftBodyInstance,      ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "Force Field",         ComponentClass::ComponentCategory::ForceFieldInstance,    ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "Fluid Region",        ComponentClass::ComponentCategory::FluidRegionInstance,   ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "Particle Cloud",      ComponentClass::ComponentCategory::ParticleCloudInstance, ComponentClass::PhysicsConstraintCategory::Fixed,  false },
+            { "BEHAVIOURS",          ComponentClass::ComponentCategory::VehicleDynamics,       ComponentClass::PhysicsConstraintCategory::Fixed,  true  },
+            { "Vehicle Dynamics",    ComponentClass::ComponentCategory::VehicleDynamics,       ComponentClass::PhysicsConstraintCategory::Fixed,  false },
         }};
 
-        std::array<DropdownDirectiveEntry, 10> Entries {};
+        std::array<DropdownDirectiveEntry, 15> Entries {};
         for (std::size_t I = 0u; I < Specs.size(); ++I)
         {
             Entries[I].Label          = Specs[I].Label;
             Entries[I].SectionCaption = Specs[I].HeaderOnly;
-            Entries[I].DividerAbove   = (I == 8u);
+            Entries[I].DividerAbove   = (I == 8u || I == 13u);
             if (!Specs[I].HeaderOnly)
             {
                 Entries[I].LeadingTint = QueryCategoryAccentTint(Specs[I].Cat);

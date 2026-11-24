@@ -4,10 +4,12 @@
 // 🧩 Phase D27-D29 Validation of ComponentClass simulation POD categories (SoftBody, ForceField, FluidRegion, ParticleCloud),
 //    non-destructive WorldPlacement overrides, and direct ComponentClass -> SimulationCoordinatorExtension assembly.
 
+#include "Engine/ComponentClass/ComponentClassValidator.h"
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/SimulationSpace/ComponentClassSimulationAssembler.h"
 
 #include <cmath>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -155,6 +157,46 @@ int main()
           tel.ActiveDeformableCount == 3u && tel.DeformableRigidContacts > 0u,
           "D29: Assembled ComponentClass world runs all 5 coupled domains cleanly with live Jolt contacts");
     seq.Finalize();
+
+    // ---------------------------------------------------------------------------------------------------------
+    // D30: ComponentClassValidator rules across all 4 simulation POD categories (clean + fault injection)
+    // ---------------------------------------------------------------------------------------------------------
+    auto diskAssetExists = [](std::string_view p) -> bool { return std::filesystem::exists(std::filesystem::path(p)); };
+    const auto cleanIssues = ComponentClassValidator::ValidateClass(rig, diskAssetExists);
+    Check(cleanIssues.empty() && !ComponentClassValidator::QueryHasBlockingErrors(cleanIssues),
+          "D30: ComponentClassValidator reports 0 issues on valid TracksideRigComponentClass against real disk assets");
+
+    ComponentClassDefinition faultyRig = rig;
+    if (auto* sb = faultyRig.Storage.ResolveSoftBody(faultyRig.Storage.FindTokenByTitle("TrackBannerCloth")))
+    {
+        sb->SoftBodyAssetPath = "EngineContent/Simulation/Deformables/NonExistent.SoftBody";
+        sb->SleepDistanceMeters = 0.0f;
+    }
+    if (auto* ff = faultyRig.Storage.ResolveForceField(faultyRig.Storage.FindTokenByTitle("CrosswindField")))
+    {
+        ff->RadiusMeters = -1.0f;
+        ff->Direction    = { 0.0f, 0.0f, 0.0f };
+    }
+    if (auto* fl = faultyRig.Storage.ResolveFluidRegion(faultyRig.Storage.FindTokenByTitle("CampfirePlume")))
+    {
+        fl->RadiusMeters = 0.0f;
+        fl->Density = 0.0f; fl->Temperature = 0.0f; fl->Fuel = 0.0f;
+    }
+    if (auto* pc = faultyRig.Storage.ResolveParticleCloud(faultyRig.Storage.FindTokenByTitle("CampfireEmbers")))
+    {
+        pc->ParticleCount = 0u;
+        pc->ReleaseRate   = 0.0f;
+    }
+
+    const auto faultIssues = ComponentClassValidator::ValidateClass(faultyRig, diskAssetExists);
+    uint32_t errorCount = 0u, warningCount = 0u;
+    for (const auto& issue : faultIssues)
+    {
+        if (issue.Severity == DiagnosticSeverity::Error) ++errorCount;
+        else if (issue.Severity == DiagnosticSeverity::Warning) ++warningCount;
+    }
+    Check(ComponentClassValidator::QueryHasBlockingErrors(faultIssues) && errorCount == 4u && warningCount == 4u,
+          "D30: ComponentClassValidator catches all 4 blocking errors & 4 warnings across SoftBody/Force/Fluid/Particles");
 
     std::cout << "ComponentClassSimulationValidation: " << gPassed << " passed, " << gFailed << " failed.\n";
     return (gFailed == 0) ? 0 : 1;
