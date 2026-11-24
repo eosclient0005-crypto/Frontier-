@@ -1335,6 +1335,12 @@ bool FluidVulkanGpuExecutor::PollAsyncOccupancyReadback() noexcept
 void FluidVulkanGpuExecutor::RetireCompletedCommandBuffersNonBlocking() noexcept
 {
     if (Interchange_ == nullptr || !Interchange_->Ready()) return;
+    if (InitCommand_.CmdBuffer != VK_NULL_HANDLE &&
+        Interchange_->QueryTimelineReached(InitCommand_.TimelineSignal))
+    {
+        Interchange_->FreeCommandBuffer(InitCommand_.CmdBuffer);
+        InitCommand_ = {};
+    }
     for (auto& pending : InFlightCommands_)
     {
         if (pending.CmdBuffer != VK_NULL_HANDLE &&
@@ -1420,13 +1426,13 @@ bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path&
     const auto spvMac    = shaderDir / "FluidMacCormackCompute.comp.spv";
     const auto spvTracer = shaderDir / "FluidTracerUpdateCompute.comp.spv";
     const auto spvDebris = shaderDir / "FluidDebrisUpdateCompute.comp.spv";
-    ProgMacCormack_   = std::filesystem::exists(spvMac)    ? Encoder_.RegisterProgram(spvMac,    macSlots,          "ComputeEntry")             : 0u;
-    ProgTracerUpdate_ = std::filesystem::exists(spvTracer) ? Encoder_.RegisterProgram(spvTracer, tracerDebrisSlots, "TracerUpdateComputeEntry") : 0u;
-    ProgDebrisUpdate_ = std::filesystem::exists(spvDebris) ? Encoder_.RegisterProgram(spvDebris, tracerDebrisSlots, "DebrisUpdateComputeEntry") : 0u;
-    Telemetry_.MacCormackPipelineReady = (ProgMacCormack_ != 0u);
-    Telemetry_.TracerDebrisReady       = (ProgTracerUpdate_ != 0u && ProgDebrisUpdate_ != 0u);
+    ProgMacCormack_   = std::filesystem::exists(spvMac)    ? Encoder_.RegisterProgram(spvMac,    macSlots,          "ComputeEntry")             : UINT32_MAX;
+    ProgTracerUpdate_ = std::filesystem::exists(spvTracer) ? Encoder_.RegisterProgram(spvTracer, tracerDebrisSlots, "TracerUpdateComputeEntry") : UINT32_MAX;
+    ProgDebrisUpdate_ = std::filesystem::exists(spvDebris) ? Encoder_.RegisterProgram(spvDebris, tracerDebrisSlots, "DebrisUpdateComputeEntry") : UINT32_MAX;
+    Telemetry_.MacCormackPipelineReady = (ProgMacCormack_ != UINT32_MAX);
+    Telemetry_.TracerDebrisReady       = (ProgTracerUpdate_ != UINT32_MAX && ProgDebrisUpdate_ != UINT32_MAX);
 
-    if (ProgInject_ == 0u || ProgAdvect_ == 0u || ProgGradient_ == 0u)
+    if (ProgInject_ == UINT32_MAX || ProgAdvect_ == UINT32_MAX || ProgGradient_ == UINT32_MAX)
     {
         ReleaseGpuResources();
         return false;
@@ -1461,11 +1467,83 @@ bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path&
     ImgDivergence_  = allocVol();
     ImgScratchA_    = allocVol();
     ImgScratchB_    = allocVol();
+    ImgDummy2DFloat_ = Interchange_->AllocateImage2D(
+        1u, 1u, VK_FORMAT_R16G16B16A16_SFLOAT,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
+    ImgDummy2DInt_   = Interchange_->AllocateImage2D(
+        1u, 1u, VK_FORMAT_R32G32B32A32_SINT,
+        VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
 
-    if (ImgVelocity_[0].ImageHandle == VK_NULL_HANDLE || ImgState_[0].ImageHandle == VK_NULL_HANDLE)
+    if (ImgVelocity_[0].ImageHandle == VK_NULL_HANDLE || ImgState_[0].ImageHandle == VK_NULL_HANDLE ||
+        ImgDummy2DFloat_.ImageHandle == VK_NULL_HANDLE || ImgDummy2DInt_.ImageHandle == VK_NULL_HANDLE)
     {
         ReleaseGpuResources();
         return false;
+    }
+
+    // One-shot Vulkan 1.2 layout transition (UNDEFINED -> GENERAL) & zero-clear for all 12 GPU images before first use.
+    if (VkCommandBuffer initCmd = Interchange_->BeginSingleTimeCommands(); initCmd != VK_NULL_HANDLE)
+    {
+        const std::array<VkImage, 12> allImages {
+            ImgVelocity_[0].ImageHandle, ImgVelocity_[1].ImageHandle,
+            ImgState_[0].ImageHandle,    ImgState_[1].ImageHandle,
+            ImgPressure_[0].ImageHandle, ImgPressure_[1].ImageHandle,
+            ImgCurl_.ImageHandle,        ImgDivergence_.ImageHandle,
+            ImgScratchA_.ImageHandle,    ImgScratchB_.ImageHandle,
+            ImgDummy2DFloat_.ImageHandle, ImgDummy2DInt_.ImageHandle
+        };
+
+        VkImageSubresourceRange subRange {};
+        subRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        subRange.baseMipLevel   = 0u;
+        subRange.levelCount     = 1u;
+        subRange.baseArrayLayer = 0u;
+        subRange.layerCount     = 1u;
+
+        std::array<VkImageMemoryBarrier, 12> barriers {};
+        for (size_t i = 0u; i < allImages.size(); ++i)
+        {
+            barriers[i].sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barriers[i].srcAccessMask       = 0u;
+            barriers[i].dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barriers[i].oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+            barriers[i].newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+            barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barriers[i].image               = allImages[i];
+            barriers[i].subresourceRange    = subRange;
+        }
+        vkCmdPipelineBarrier(
+            initCmd,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0u, 0u, nullptr, 0u, nullptr,
+            static_cast<uint32_t>(barriers.size()), barriers.data());
+
+        VkClearColorValue zeroFloat {};
+        for (size_t i = 0u; i < 11u; ++i)
+        {
+            vkCmdClearColorImage(initCmd, allImages[i], VK_IMAGE_LAYOUT_GENERAL, &zeroFloat, 1u, &subRange);
+        }
+        VkClearColorValue zeroInt {};
+        zeroInt.int32[0] = -1;
+        zeroInt.int32[1] = -1;
+        zeroInt.int32[2] = -1;
+        zeroInt.int32[3] = -1;
+        vkCmdClearColorImage(initCmd, ImgDummy2DInt_.ImageHandle, VK_IMAGE_LAYOUT_GENERAL, &zeroInt, 1u, &subRange);
+
+        VkMemoryBarrier postClear {};
+        postClear.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        postClear.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        postClear.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(
+            initCmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0u, 1u, &postClear, 0u, nullptr, 0u, nullptr);
+
+        InitCommand_.CmdBuffer      = initCmd;
+        InitCommand_.TimelineSignal = Interchange_->DispatchCommandBufferAsync(initCmd);
     }
 
     BufForceRecords_ = Encoder_.AllocateHostWritableBuffer(
@@ -1483,7 +1561,9 @@ bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path&
     for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
     {
         BufInjectUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidInjectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufInjectVelUbo_[s]  = Encoder_.AllocateHostWritableBuffer(sizeof(FluidInjectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         BufAdvectUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidAdvectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufAdvectBwdUbo_[s]  = Encoder_.AllocateHostWritableBuffer(sizeof(FluidAdvectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         BufMacCormackUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidMacCormackUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         BufThermoUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidThermodynamicsUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         BufForcesUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidForcesUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
@@ -1506,6 +1586,24 @@ void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
     if (Interchange_ != nullptr && Interchange_->Ready())
     {
         RetireCompletedCommandBuffersNonBlocking();
+        uint64_t maxPendingTick = (InitCommand_.CmdBuffer != VK_NULL_HANDLE) ? InitCommand_.TimelineSignal : 0ull;
+        for (const auto& pending : InFlightCommands_)
+        {
+            if (pending.CmdBuffer != VK_NULL_HANDLE && pending.TimelineSignal > maxPendingTick)
+            {
+                maxPendingTick = pending.TimelineSignal;
+            }
+        }
+        if (maxPendingTick > 0ull)
+        {
+            // Teardown-only synchronization so in-flight GPU command buffers complete before destroying resources.
+            (void)Interchange_->AwaitTimelineTick(maxPendingTick);
+        }
+        if (InitCommand_.CmdBuffer != VK_NULL_HANDLE)
+        {
+            Interchange_->FreeCommandBuffer(InitCommand_.CmdBuffer);
+            InitCommand_ = {};
+        }
         for (auto& pending : InFlightCommands_)
         {
             if (pending.CmdBuffer != VK_NULL_HANDLE)
@@ -1522,6 +1620,7 @@ void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
         relImg(ImgState_[0]);    relImg(ImgState_[1]);
         relImg(ImgPressure_[0]); relImg(ImgPressure_[1]);
         relImg(ImgCurl_); relImg(ImgDivergence_); relImg(ImgScratchA_); relImg(ImgScratchB_);
+        relImg(ImgDummy2DFloat_); relImg(ImgDummy2DInt_);
 
         auto relBuf = [&](GeometricRaster::DeviceBufferResource& b)
         {
@@ -1534,7 +1633,8 @@ void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
         relBuf(BufDebrisVel_[0]); relBuf(BufDebrisVel_[1]);
         for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
         {
-            relBuf(BufInjectUbo_[s]); relBuf(BufAdvectUbo_[s]); relBuf(BufMacCormackUbo_[s]);
+            relBuf(BufInjectUbo_[s]); relBuf(BufInjectVelUbo_[s]);
+            relBuf(BufAdvectUbo_[s]); relBuf(BufAdvectBwdUbo_[s]); relBuf(BufMacCormackUbo_[s]);
             relBuf(BufThermoUbo_[s]); relBuf(BufForcesUbo_[s]); relBuf(BufVortUbo_[s]);
             relBuf(BufDivUbo_[s]);    relBuf(BufPressUbo_[s]);  relBuf(BufGradUbo_[s]);
             relBuf(BufTracerUbo_[s]); relBuf(BufDebrisUbo_[s]);
@@ -1546,6 +1646,9 @@ void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
         }
     }
     Encoder_.TeardownEncoder();
+    ProgInject_ = ProgAdvect_ = ProgMacCormack_ = ProgThermo_ = ProgForces_ = UINT32_MAX;
+    ProgCurl_ = ProgVorticity_ = ProgDivergence_ = ProgPressure_ = ProgGradient_ = UINT32_MAX;
+    ProgOccupancy_ = ProgTracerUpdate_ = ProgDebrisUpdate_ = UINT32_MAX;
     GpuLiveReady_ = false;
 }
 
@@ -1560,6 +1663,16 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
     RetireCompletedCommandBuffersNonBlocking();
 
     const uint32_t slot = Telemetry_.ActiveRingSlot;
+    // Triple-buffer ring guard: only wait if CPU wrapped 3 full frames ahead of GPU on this slot.
+    if (InFlightCommands_[slot].CmdBuffer != VK_NULL_HANDLE)
+    {
+        if (InFlightCommands_[slot].TimelineSignal > 0ull)
+        {
+            (void)Interchange_->AwaitTimelineTick(InFlightCommands_[slot].TimelineSignal);
+        }
+        Interchange_->FreeCommandBuffer(InFlightCommands_[slot].CmdBuffer);
+        InFlightCommands_[slot] = {};
+    }
     const uint32_t gx = (GridCells_[0] + 7u) / 8u;
     const uint32_t gy = (GridCells_[1] + 7u) / 8u;
     const uint32_t gz = (GridCells_[2] + 3u) / 4u;
@@ -1579,21 +1692,31 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         std::memcpy(BufForceRecords_.HostAddress, forceRecords.data(), n * sizeof(ForceFields::ForceModelGpuRecord));
     }
 
-    FluidInjectUniformBlock injectU {};
-    injectU.Volume       = vol;
-    injectU.InjectTiming = { static_cast<float>(SimTime_), static_cast<float>(std::min<size_t>(sources.size(), 6u)), deltaTimeSeconds, 0.0f };
+    FluidInjectUniformBlock injectStateU {};
+    injectStateU.Volume       = vol;
+    injectStateU.InjectTiming = { 1.0f, static_cast<float>(std::min<size_t>(sources.size(), 6u)), deltaTimeSeconds, static_cast<float>(SimTime_) };
     for (size_t i = 0u; i < std::min<size_t>(sources.size(), 6u); ++i)
     {
-        injectU.SourcePosRadius[i]     = { sources[i].PositionMeters[0], sources[i].PositionMeters[1], sources[i].PositionMeters[2], sources[i].RadiusMeters };
-        injectU.SourceVelDensity[i]    = { sources[i].VelocityMps[0], sources[i].VelocityMps[1], sources[i].VelocityMps[2], sources[i].Density };
-        injectU.SourceTempFuelShape[i] = { sources[i].Temperature, sources[i].Fuel, static_cast<float>(sources[i].Shape), sources[i].Jitter };
+        injectStateU.SourcePosRadius[i]     = { sources[i].PositionMeters[0], sources[i].PositionMeters[1], sources[i].PositionMeters[2], sources[i].RadiusMeters };
+        injectStateU.SourceVelDensity[i]    = { sources[i].VelocityMps[0], sources[i].VelocityMps[1], sources[i].VelocityMps[2], sources[i].Density };
+        injectStateU.SourceTempFuelShape[i] = { sources[i].Temperature, sources[i].Fuel, sources[i].Jitter, static_cast<float>(sources[i].Shape) };
+        injectStateU.SourceOrientPulse[i]   = { sources[i].Orientation[0], sources[i].Orientation[1], sources[i].Orientation[2], sources[i].PulseSeconds };
     }
-    if (BufInjectUbo_[slot].HostAddress) std::memcpy(BufInjectUbo_[slot].HostAddress, &injectU, sizeof(injectU));
+    if (BufInjectUbo_[slot].HostAddress) std::memcpy(BufInjectUbo_[slot].HostAddress, &injectStateU, sizeof(injectStateU));
+
+    FluidInjectUniformBlock injectVelU = injectStateU;
+    injectVelU.InjectTiming[0] = 0.0f; // mode 0 = velocity injection
+    if (BufInjectVelUbo_[slot].HostAddress) std::memcpy(BufInjectVelUbo_[slot].HostAddress, &injectVelU, sizeof(injectVelU));
 
     FluidAdvectUniformBlock advU {};
     advU.Volume       = vol;
     advU.AdvectParams = { deltaTimeSeconds, settings.Dissipation, 1.0f, 0.0f };
     if (BufAdvectUbo_[slot].HostAddress) std::memcpy(BufAdvectUbo_[slot].HostAddress, &advU, sizeof(advU));
+
+    FluidAdvectUniformBlock advBwdU {};
+    advBwdU.Volume       = vol;
+    advBwdU.AdvectParams = { -deltaTimeSeconds, 1.0f, 1.0f, 0.0f };
+    if (BufAdvectBwdUbo_[slot].HostAddress) std::memcpy(BufAdvectBwdUbo_[slot].HostAddress, &advBwdU, sizeof(advBwdU));
 
     FluidMacCormackUniformBlock macU {};
     macU.Volume           = vol;
@@ -1642,22 +1765,30 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
     const uint32_t dstIdx = 1u - ActivePong_;
     uint64_t dispatches = 0ull;
 
-    // 1. Inject -> 2. Advect -> 3. Thermodynamics -> 4. Forces -> 5. Divergence -> 6. Jacobi Pressure -> 7. Gradient
+    // 1a. Inject State -> State[dstIdx], 1b. Inject Velocity -> Velocity[dstIdx]
     {
-        const std::array<ComputeSlotDescriptor, 3> s {{
-            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufInjectUbo_[slot].BufferHandle, sizeof(injectU) },
+        const std::array<ComputeSlotDescriptor, 3> sState {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufInjectUbo_[slot].BufferHandle, sizeof(injectStateU) },
             { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 2u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
         }};
-        if (Encoder_.EncodeComputeDispatch(cmd, ProgInject_, s, gx, gy, gz)) ++dispatches;
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgInject_, sState, gx, gy, gz)) ++dispatches;
+
+        const std::array<ComputeSlotDescriptor, 3> sVel {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufInjectVelUbo_[slot].BufferHandle, sizeof(injectVelU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgInject_, sVel, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
-    if (UseMacCormack_ && ProgMacCormack_ != 0u)
+    // 2. Advect State[dstIdx] -> State[srcIdx] using Velocity[dstIdx]
+    if (UseMacCormack_ && ProgMacCormack_ != UINT32_MAX)
     {
-        // Selle et al. (2008) 3-pass MacCormack advection: forward -> ScratchA, backward -> ScratchB, correct -> State[srcIdx]
+        // Selle et al. (2008) 3-pass MacCormack advection: forward (+dt) -> ScratchA, backward (-dt) -> ScratchB, correct -> State[srcIdx]
         const std::array<ComputeSlotDescriptor, 5> sFwd {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
-            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
@@ -1666,8 +1797,8 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         emitBarrier();
 
         const std::array<ComputeSlotDescriptor, 5> sBwd {{
-            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
-            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectBwdUbo_[slot].BufferHandle, sizeof(advBwdU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchB_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
@@ -1677,7 +1808,7 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
 
         const std::array<ComputeSlotDescriptor, 7> sCor {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufMacCormackUbo_[slot].BufferHandle, sizeof(macU) },
-            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchB_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
@@ -1691,7 +1822,7 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
     {
         const std::array<ComputeSlotDescriptor, 5> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
-            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[srcIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
@@ -1699,6 +1830,7 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         if (Encoder_.EncodeComputeDispatch(cmd, ProgAdvect_, s, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
+    // 3. Thermodynamics: State[srcIdx] -> State[dstIdx] (final state lands in State[dstIdx])
     {
         const std::array<ComputeSlotDescriptor, 3> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufThermoUbo_[slot].BufferHandle, sizeof(thermoU) },
@@ -1708,31 +1840,34 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         if (Encoder_.EncodeComputeDispatch(cmd, ProgThermo_, s, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
+    // 4. Forces: Velocity[dstIdx] + State[dstIdx] -> Velocity[srcIdx]
     {
         const std::array<ComputeSlotDescriptor, 5> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufForcesUbo_[slot].BufferHandle, sizeof(forcesU) },
-            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufForceRecords_.BufferHandle,    VK_WHOLE_SIZE },
-            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
+            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
         }};
         if (Encoder_.EncodeComputeDispatch(cmd, ProgForces_, s, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
+    // 5. Divergence: Velocity[srcIdx] + State[dstIdx] -> ImgDivergence_ (distinct read-only ImgScratchA_ on unused slot 5)
     {
         const std::array<ComputeSlotDescriptor, 7> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufDivUbo_[slot].BufferHandle,   sizeof(divU) },
             { 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufPressUbo_[slot].BufferHandle, sizeof(pressU) },
-            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
-            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDivergence_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 6u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDivergence_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL }
         }};
         if (Encoder_.EncodeComputeDispatch(cmd, ProgDivergence_, s, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
 
+    // 6. Jacobi Pressure iterations
     uint32_t pSrc = srcIdx;
     const uint32_t jacobiIters = std::clamp(settings.PressureIterations, 2u, 48u);
     for (uint32_t iter = 0u; iter < jacobiIters; ++iter)
@@ -1741,7 +1876,7 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         const std::array<ComputeSlotDescriptor, 7> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufDivUbo_[slot].BufferHandle,   sizeof(divU) },
             { 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufPressUbo_[slot].BufferHandle, sizeof(pressU) },
-            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[pSrc].ViewHandle,   VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDivergence_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
@@ -1752,22 +1887,23 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         pSrc = pDst;
     }
 
+    // 7. Gradient Projection: Pressure[pSrc] + Velocity[srcIdx] -> Velocity[dstIdx] (aligns with State[dstIdx]!)
     {
         const std::array<ComputeSlotDescriptor, 8> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufGradUbo_[slot].BufferHandle, sizeof(gradU) },
             { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgPressure_[pSrc].ViewHandle,   VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
-            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
-            { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
-            { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
-            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
-            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDummy2DFloat_.ViewHandle,     VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDummy2DFloat_.ViewHandle,     VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 5u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgDummy2DInt_.ViewHandle,       VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 7u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufOccupancy_.BufferHandle,     VK_WHOLE_SIZE }
         }};
         if (Encoder_.EncodeComputeDispatch(cmd, ProgGradient_, s, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
 
-    if (ProgTracerUpdate_ != 0u || ProgDebrisUpdate_ != 0u)
+    if (ProgTracerUpdate_ != UINT32_MAX || ProgDebrisUpdate_ != UINT32_MAX)
     {
         struct alignas(16) TracerUboPod
         {
@@ -1781,7 +1917,7 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         const std::array<ComputeSlotDescriptor, 10> tdSlots {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufTracerUbo_[slot].BufferHandle,  192u },
             { 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufDebrisUbo_[slot].BufferHandle,  512u },
-            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[dstIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
             { 3u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE, LinearSampler_, VK_IMAGE_LAYOUT_GENERAL },
             { 4u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufTracers_[srcIdx].BufferHandle,   VK_WHOLE_SIZE },
             { 5u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufTracers_[dstIdx].BufferHandle,   VK_WHOLE_SIZE },
@@ -1791,8 +1927,8 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
             { 9u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufDebrisVel_[dstIdx].BufferHandle, VK_WHOLE_SIZE }
         }};
         const uint32_t tdGroups = (2048u + 63u) / 64u;
-        if (ProgTracerUpdate_ != 0u && Encoder_.EncodeComputeDispatch(cmd, ProgTracerUpdate_, tdSlots, tdGroups)) ++dispatches;
-        if (ProgDebrisUpdate_ != 0u && Encoder_.EncodeComputeDispatch(cmd, ProgDebrisUpdate_, tdSlots, tdGroups)) ++dispatches;
+        if (ProgTracerUpdate_ != UINT32_MAX && Encoder_.EncodeComputeDispatch(cmd, ProgTracerUpdate_, tdSlots, tdGroups)) ++dispatches;
+        if (ProgDebrisUpdate_ != UINT32_MAX && Encoder_.EncodeComputeDispatch(cmd, ProgDebrisUpdate_, tdSlots, tdGroups)) ++dispatches;
         emitBarrier();
     }
 

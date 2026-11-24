@@ -19,7 +19,7 @@ public struct FluidGradientShiftUniformBlock
 [[vk::binding(3, 0)]] Texture2D<float4>                              gSparseStateAtlas;
 [[vk::binding(4, 0)]] Texture2D<float4>                              gSparseVelocityAtlas;
 [[vk::binding(5, 0)]] Texture2D<int4>                                gSparseSlotTable;
-[[vk::binding(6, 0)]] RWTexture3D<float4>                            gOutput;
+[[vk::binding(6, 0)]] [format("rgba16f")] RWTexture3D<float4>                            gOutput;
 [[vk::binding(7, 0)]] RWStructuredBuffer<float4>                     gOccupancyReadback; // 3 * slotCount float4 entries
 
 float SampleGradientPressureNeighbour(FluidVolumeUniformBlock vol, int3 neighbour, float centre)

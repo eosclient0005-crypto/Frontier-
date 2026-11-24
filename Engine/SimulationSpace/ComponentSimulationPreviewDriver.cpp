@@ -54,13 +54,20 @@ bool ComponentSimulationPreviewDriver::StartPreview(
     const SimulationSceneDocument sceneDoc = ComponentClassSimulationAssembler::BuildSceneFromPlacements(
         catalog, placementReg, definition.Title, &AssemblyReport_);
 
-    Coordinator_ = std::make_unique<SimulationCoordinatorExtension>(
-        SimulationSceneCodec::BuildCoordinatorParameters(sceneDoc));
+    auto params = SimulationSceneCodec::BuildCoordinatorParameters(sceneDoc);
+#if FRONTIER_FLUID_HAS_VULKAN
+    if (!CompiledShaderDirectory_.empty())
+    {
+        params.CompiledShaderDirectory                      = CompiledShaderDirectory_;
+        params.DeformableParameters.CompiledShaderDirectory = CompiledShaderDirectory_;
+    }
+#endif
+    Coordinator_ = std::make_unique<SimulationCoordinatorExtension>(std::move(params));
     Coordinator_->SetShouldUpdate(ShouldUpdate_);
 #if FRONTIER_FLUID_HAS_VULKAN
     if (Interchange_ != nullptr)
     {
-        (void)Coordinator_->AttachVulkanInterchange(Interchange_);
+        (void)Coordinator_->AttachVulkanInterchange(Interchange_, CompiledShaderDirectory_);
     }
 #endif
 
@@ -107,10 +114,18 @@ void ComponentSimulationPreviewDriver::SetShouldUpdate(bool shouldUpdate) noexce
 }
 
 #if FRONTIER_FLUID_HAS_VULKAN
-bool ComponentSimulationPreviewDriver::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+bool ComponentSimulationPreviewDriver::AttachVulkanInterchange(
+    GeometricRaster::VulkanInterchange* interchange,
+    const std::filesystem::path& compiledShaderDirectory) noexcept
 {
     Interchange_ = interchange;
-    return Coordinator_ ? Coordinator_->AttachVulkanInterchange(interchange) : (interchange != nullptr && interchange->Ready());
+    if (!compiledShaderDirectory.empty())
+    {
+        CompiledShaderDirectory_ = compiledShaderDirectory;
+    }
+    return Coordinator_
+        ? Coordinator_->AttachVulkanInterchange(interchange, CompiledShaderDirectory_)
+        : (interchange != nullptr && interchange->Ready());
 }
 #endif
 

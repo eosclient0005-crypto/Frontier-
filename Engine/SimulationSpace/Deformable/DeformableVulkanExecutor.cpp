@@ -128,6 +128,55 @@ bool DeformableVulkanExecutor::UploadVertexMotionAtlas(
         {
             return false;
         }
+
+        // Transition VatPosImage_ & VatNrmImage_ from UNDEFINED -> GENERAL and zero-clear before first use.
+        if (VkCommandBuffer initCmd = Interchange_->BeginSingleTimeCommands(); initCmd != VK_NULL_HANDLE)
+        {
+            VkImageSubresourceRange subRange {};
+            subRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+            subRange.baseMipLevel   = 0u;
+            subRange.levelCount     = 1u;
+            subRange.baseArrayLayer = 0u;
+            subRange.layerCount     = 1u;
+
+            std::array<VkImageMemoryBarrier, 2> barriers {};
+            const std::array<VkImage, 2> imgs { VatPosImage_.ImageHandle, VatNrmImage_.ImageHandle };
+            for (size_t i = 0u; i < 2u; ++i)
+            {
+                barriers[i].sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                barriers[i].srcAccessMask       = 0u;
+                barriers[i].dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+                barriers[i].oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+                barriers[i].newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+                barriers[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barriers[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                barriers[i].image               = imgs[i];
+                barriers[i].subresourceRange    = subRange;
+            }
+            vkCmdPipelineBarrier(
+                initCmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                0u, 0u, nullptr, 0u, nullptr, 2u, barriers.data());
+
+            VkClearColorValue zeroColor {};
+            vkCmdClearColorImage(initCmd, VatPosImage_.ImageHandle, VK_IMAGE_LAYOUT_GENERAL, &zeroColor, 1u, &subRange);
+            vkCmdClearColorImage(initCmd, VatNrmImage_.ImageHandle, VK_IMAGE_LAYOUT_GENERAL, &zeroColor, 1u, &subRange);
+
+            VkMemoryBarrier postClear {};
+            postClear.sType         = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            postClear.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            postClear.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdPipelineBarrier(
+                initCmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0u, 1u, &postClear, 0u, nullptr, 0u, nullptr);
+
+            if (InitCommand_.CmdBuffer != VK_NULL_HANDLE)
+            {
+                (void)Interchange_->AwaitTimelineTick(InitCommand_.TimelineSignal);
+                Interchange_->FreeCommandBuffer(InitCommand_.CmdBuffer);
+            }
+            InitCommand_.CmdBuffer      = initCmd;
+            InitCommand_.TimelineSignal = Interchange_->DispatchCommandBufferAsync(initCmd);
+        }
     }
 #endif
 
@@ -165,7 +214,7 @@ const DeformableSubstepDispatchPlan& DeformableVulkanExecutor::ExecuteTickInPlac
     {
         // Live Hardware GPU path: ZERO CPU XpbdConstraintSolver::Step mirror, ZERO mid-frame stalls!
         Telemetry_.ActiveRingSlot = nextSlot;
-        DispatchGpuAsync(externalCoupling);
+        DispatchGpuAsync(body, configuration, subDt, simTimeSeconds, externalCoupling);
         (void)ImpulseReadbackRing_.PollNonBlocking();
         Telemetry_.Route             = DeformableExecutionRoute::VulkanComputeGpu;
         Telemetry_.RealGpuDispatched = true;
@@ -266,6 +315,12 @@ bool DeformableVulkanExecutor::AttachVulkanInterchange(GeometricRaster::VulkanIn
 void DeformableVulkanExecutor::RetireCompletedCommandBuffersNonBlocking() noexcept
 {
     if (Interchange_ == nullptr || !Interchange_->Ready()) return;
+    if (InitCommand_.CmdBuffer != VK_NULL_HANDLE &&
+        Interchange_->QueryTimelineReached(InitCommand_.TimelineSignal))
+    {
+        Interchange_->FreeCommandBuffer(InitCommand_.CmdBuffer);
+        InitCommand_ = {};
+    }
     for (auto& pending : InFlightCommands_)
     {
         if (pending.CmdBuffer != VK_NULL_HANDLE &&
@@ -325,9 +380,9 @@ bool DeformableVulkanExecutor::InitializeGpuResources(
     ProgContact_    = Encoder_.RegisterProgram(spvContact,    predictSlots, "CsDeformableContactUpdate");
     ProgVatBake_    = std::filesystem::exists(spvVatBake)
         ? Encoder_.RegisterProgram(spvVatBake, vatSlots, "CsVertexMotionAtlasBake")
-        : 0u;
+        : UINT32_MAX;
 
-    if (ProgPredict_ == 0u || ProgContact_ == 0u)
+    if (ProgPredict_ == UINT32_MAX || ProgContact_ == UINT32_MAX)
     {
         ReleaseGpuResources();
         return false;
@@ -345,9 +400,12 @@ bool DeformableVulkanExecutor::InitializeGpuResources(
         return buf;
     };
 
+    static_assert(sizeof(DeformableStepUniforms) <= kStepUboStrideBytes,
+                  "DeformableStepUniforms must fit inside a 256-byte dynamic UBO slice.");
+    const uint64_t uboRingBytes = static_cast<uint64_t>(kStepUboStrideBytes) * kMaxStepUboSlices;
     for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
     {
-        UniformBuffers_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(DeformableStepUniforms), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        UniformBuffers_[s] = Encoder_.AllocateHostWritableBuffer(uboRingBytes, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         if (UniformBuffers_[s].BufferHandle == VK_NULL_HANDLE)
         {
             ReleaseGpuResources();
@@ -389,6 +447,24 @@ void DeformableVulkanExecutor::ReleaseGpuResources() noexcept
     if (Interchange_ != nullptr && Interchange_->Ready())
     {
         RetireCompletedCommandBuffersNonBlocking();
+        uint64_t maxPendingTick = (InitCommand_.CmdBuffer != VK_NULL_HANDLE) ? InitCommand_.TimelineSignal : 0ull;
+        for (const auto& pending : InFlightCommands_)
+        {
+            if (pending.CmdBuffer != VK_NULL_HANDLE && pending.TimelineSignal > maxPendingTick)
+            {
+                maxPendingTick = pending.TimelineSignal;
+            }
+        }
+        if (maxPendingTick > 0ull)
+        {
+            // Teardown-only synchronization so in-flight GPU command buffers finish before destroying resources.
+            (void)Interchange_->AwaitTimelineTick(maxPendingTick);
+        }
+        if (InitCommand_.CmdBuffer != VK_NULL_HANDLE)
+        {
+            Interchange_->FreeCommandBuffer(InitCommand_.CmdBuffer);
+            InitCommand_ = {};
+        }
         for (auto& pending : InFlightCommands_)
         {
             if (pending.CmdBuffer != VK_NULL_HANDLE)
@@ -419,43 +495,151 @@ void DeformableVulkanExecutor::ReleaseGpuResources() noexcept
         if (VatNrmImage_.ImageHandle != VK_NULL_HANDLE) Interchange_->ReleaseImage2D(VatNrmImage_);
     }
     Encoder_.TeardownEncoder();
-    ProgPredict_ = ProgDistance_ = ProgBend_ = ProgNeoHookean_ = ProgContact_ = ProgVatBake_ = 0u;
+    ProgPredict_ = ProgDistance_ = ProgBend_ = ProgNeoHookean_ = ProgContact_ = ProgVatBake_ = UINT32_MAX;
     GpuLiveReady_ = false;
 }
 
-void DeformableVulkanExecutor::DispatchGpuAsync(const DeformableExternalCoupling* externalCoupling) noexcept
+void DeformableVulkanExecutor::DispatchGpuAsync(
+    const DeformableBody& body,
+    const DeformableSimulationConfiguration& configuration,
+    float subDt,
+    float simTimeSeconds,
+    const DeformableExternalCoupling* externalCoupling) noexcept
 {
     using namespace GeometricRaster;
     RetireCompletedCommandBuffersNonBlocking();
 
     const uint32_t slot = Telemetry_.ActiveRingSlot;
-    if (UniformBuffers_[slot].HostAddress != nullptr)
+    // Triple-buffer ring guard: only wait if CPU wrapped 3 full frames ahead of GPU on this slot.
+    if (InFlightCommands_[slot].CmdBuffer != VK_NULL_HANDLE)
     {
-        std::memcpy(UniformBuffers_[slot].HostAddress, &LastUniforms_, sizeof(DeformableStepUniforms));
+        if (InFlightCommands_[slot].TimelineSignal > 0ull)
+        {
+            (void)Interchange_->AwaitTimelineTick(InFlightCommands_[slot].TimelineSignal);
+        }
+        Interchange_->FreeCommandBuffer(InFlightCommands_[slot].CmdBuffer);
+        InFlightCommands_[slot] = {};
     }
 
-    if (externalCoupling != nullptr && !externalCoupling->RigidProxies.empty() && BufRigidProxies_.HostAddress != nullptr)
+    // Matches DeformableStepUniforms in Engine/Shaders/Deformable/DeformableLayouts.slang byte-for-byte (128 bytes).
+    struct alignas(16) DeformableStepUniformsGpuPod
     {
-        const uint32_t copyCount = static_cast<uint32_t>(std::min<size_t>(externalCoupling->RigidProxies.size(), kMaxRigidProxies));
+        float    TimeGravity[4];        // x = subDt, y = simTime, z = gravityY, w = dampingDecay
+        float    WindConfig[4];         // x = windStrength, y = windDirRad, z = fluidDrag, w = groundY
+        float    MaterialCompliance[4]; // x = stretchComp, y = bendComp, z = femLambda, w = femMu
+        float    TireSpinPressure[4];   // x = spinRadPerSec, y = pressureBar, z = rimRadius, w = axleY
+        float    TireAxleTarget[4];     // x = axleX, y = targetAxleY, z = axleZ, w = tireMode (0=none, 1=pneumatic, 2=fem)
+        float    ColliderSphere[4];     // xyz = centerMeters, w = radiusMeters (<= 0 disables)
+        uint32_t Counts[4];             // x = pointCount, y = activeBatchStart, z = activeBatchCount, w = proxyCount
+        float    Flags[4];              // x = tearingEnabled, y = tearRatio, z = strainDecay, w = femComplianceScale
+    };
+    static_assert(sizeof(DeformableStepUniformsGpuPod) == 128u,
+                  "DeformableStepUniformsGpuPod must match DeformableLayouts.slang (128 bytes).");
+
+    const uint32_t proxyCount = (externalCoupling != nullptr)
+        ? static_cast<uint32_t>(std::min<size_t>(externalCoupling->RigidProxies.size(), kMaxRigidProxies))
+        : 0u;
+    if (proxyCount > 0u && BufRigidProxies_.HostAddress != nullptr)
+    {
         std::memcpy(BufRigidProxies_.HostAddress, externalCoupling->RigidProxies.data(),
-                    static_cast<size_t>(copyCount) * sizeof(PhysicsSpace::RigidColliderProxy));
+                    static_cast<size_t>(proxyCount) * sizeof(PhysicsSpace::RigidColliderProxy));
+    }
+
+    const float E  = std::max(0.05f, configuration.FemYoungMpa) * 1.0e6f;
+    const float nu = std::clamp(configuration.FemPoissonNu, 0.05f, 0.485f);
+    const float mu = E / (2.0f * (1.0f + nu));
+    const float la = (E * nu) / ((1.0f + nu) * (1.0f - 2.0f * nu));
+
+    float tireMode = 0.0f;
+    float rimRad   = 0.0f;
+    float axleX    = 0.0f;
+    float axleY    = 0.0f;
+    float axleZ    = 0.0f;
+    if (!body.FemTires.empty())
+    {
+        tireMode = 2.0f;
+        rimRad   = body.FemTires[0].RimRadius;
+        axleX    = body.FemTires[0].AxleX;
+        axleY    = body.FemTires[0].AxleY;
+        axleZ    = body.FemTires[0].AxleZ;
+    }
+    else if (!body.PneumaticTires.empty())
+    {
+        tireMode = 1.0f;
+        rimRad   = body.PneumaticTires[0].RimRadius;
+        axleX    = body.PneumaticTires[0].AxleX;
+        axleY    = body.PneumaticTires[0].AxleY;
+        axleZ    = body.PneumaticTires[0].AxleZ;
+    }
+
+    DeformableStepUniformsGpuPod baseGpuU {};
+    baseGpuU.TimeGravity[0]        = subDt;
+    baseGpuU.TimeGravity[1]        = simTimeSeconds;
+    baseGpuU.TimeGravity[2]        = configuration.GravityY;
+    baseGpuU.TimeGravity[3]        = 1.0f - std::clamp(configuration.Damping, 0.0f, 0.999f);
+    baseGpuU.WindConfig[0]         = configuration.WindStrength;
+    baseGpuU.WindConfig[1]         = 0.0f;
+    baseGpuU.WindConfig[2]         = body.UnderwaterEnabled ? 1.8f : 0.05f;
+    baseGpuU.WindConfig[3]         = body.GroundY;
+    baseGpuU.MaterialCompliance[0] = 1.0f / std::max(1.0f, configuration.StretchStiffness);
+    baseGpuU.MaterialCompliance[1] = 1.0f / std::max(0.01f, configuration.BendStiffness);
+    baseGpuU.MaterialCompliance[2] = la;
+    baseGpuU.MaterialCompliance[3] = mu;
+    baseGpuU.TireSpinPressure[0]   = configuration.TireSpinRadPerSec;
+    baseGpuU.TireSpinPressure[1]   = configuration.TirePressurePsi * 0.0689476f;
+    baseGpuU.TireSpinPressure[2]   = rimRad;
+    baseGpuU.TireSpinPressure[3]   = axleY;
+    baseGpuU.TireAxleTarget[0]     = axleX;
+    baseGpuU.TireAxleTarget[1]     = axleY;
+    baseGpuU.TireAxleTarget[2]     = axleZ;
+    baseGpuU.TireAxleTarget[3]     = tireMode;
+    baseGpuU.ColliderSphere[0]     = body.Collider.CenterMeters[0];
+    baseGpuU.ColliderSphere[1]     = body.Collider.CenterMeters[1];
+    baseGpuU.ColliderSphere[2]     = body.Collider.CenterMeters[2];
+    baseGpuU.ColliderSphere[3]     = (body.Collider.Active && configuration.ColliderEnabled) ? body.Collider.RadiusMeters : 0.0f;
+    baseGpuU.Counts[0]             = body.PointCount;
+    baseGpuU.Counts[1]             = 0u;
+    baseGpuU.Counts[2]             = body.PointCount;
+    baseGpuU.Counts[3]             = proxyCount;
+    baseGpuU.Flags[0]              = (configuration.TearRatio > 0.0f) ? 1.0f : 0.0f;
+    baseGpuU.Flags[1]              = configuration.TearRatio;
+    baseGpuU.Flags[2]              = 0.96f;
+    baseGpuU.Flags[3]              = 1.0f;
+
+    uint8_t* const uboBasePtr = static_cast<uint8_t*>(UniformBuffers_[slot].HostAddress);
+    if (uboBasePtr != nullptr)
+    {
+        std::memcpy(uboBasePtr, &baseGpuU, sizeof(baseGpuU));
     }
 
     VkCommandBuffer cmd = Interchange_->BeginSingleTimeCommands();
     if (cmd == VK_NULL_HANDLE) return;
 
     const VkBuffer ubo = UniformBuffers_[slot].BufferHandle;
+    uint32_t sliceIndex = 0u;
 
     for (const auto& step : ReusablePlan_.Steps)
     {
         if (step.ThreadGroupsX == 0u) continue;
+        if (sliceIndex >= kMaxStepUboSlices) break;
+
+        // Write per-step BatchStartOffset (Counts[1]) and WorkItemCount (Counts[2]) into an isolated 256B UBO slice.
+        DeformableStepUniformsGpuPod stepUniforms = baseGpuU;
+        stepUniforms.Counts[1] = step.BatchStartOffset;
+        stepUniforms.Counts[2] = step.WorkItemCount;
+        const uint64_t uboOffsetBytes = static_cast<uint64_t>(sliceIndex) * kStepUboStrideBytes;
+        if (uboBasePtr != nullptr)
+        {
+            std::memcpy(uboBasePtr + uboOffsetBytes, &stepUniforms, sizeof(stepUniforms));
+        }
+        ++sliceIndex;
 
         switch (step.Pass)
         {
             case DeformableComputePassOrdinal::PredictIntegrate:
             {
                 const std::array<ComputeSlotDescriptor, 5> slots {{
-                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo,                              sizeof(DeformableStepUniforms) },
+                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo, sizeof(DeformableStepUniforms), uboOffsetBytes },
                     { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPositionsInvMass_.BufferHandle, VK_WHOLE_SIZE },
                     { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPrevPosStrain_.BufferHandle,    VK_WHOLE_SIZE },
                     { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufVelocitiesFlags_.BufferHandle,  VK_WHOLE_SIZE },
@@ -467,7 +651,7 @@ void DeformableVulkanExecutor::DispatchGpuAsync(const DeformableExternalCoupling
             case DeformableComputePassOrdinal::DistanceBatch:
             {
                 const std::array<ComputeSlotDescriptor, 5> slots {{
-                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo,                              sizeof(DeformableStepUniforms) },
+                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo, sizeof(DeformableStepUniforms), uboOffsetBytes },
                     { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPositionsInvMass_.BufferHandle, VK_WHOLE_SIZE },
                     { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPrevPosStrain_.BufferHandle,    VK_WHOLE_SIZE },
                     { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufDistanceCons_.BufferHandle,     VK_WHOLE_SIZE },
@@ -479,7 +663,7 @@ void DeformableVulkanExecutor::DispatchGpuAsync(const DeformableExternalCoupling
             case DeformableComputePassOrdinal::BendBatch:
             {
                 const std::array<ComputeSlotDescriptor, 4> slots {{
-                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo,                              sizeof(DeformableStepUniforms) },
+                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo, sizeof(DeformableStepUniforms), uboOffsetBytes },
                     { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPositionsInvMass_.BufferHandle, VK_WHOLE_SIZE },
                     { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufBendCons_.BufferHandle,         VK_WHOLE_SIZE },
                     { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufBendOrder_.BufferHandle,        VK_WHOLE_SIZE }
@@ -490,7 +674,7 @@ void DeformableVulkanExecutor::DispatchGpuAsync(const DeformableExternalCoupling
             case DeformableComputePassOrdinal::NeoHookeanTet:
             {
                 const std::array<ComputeSlotDescriptor, 6> slots {{
-                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo,                              sizeof(DeformableStepUniforms) },
+                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo, sizeof(DeformableStepUniforms), uboOffsetBytes },
                     { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPositionsInvMass_.BufferHandle, VK_WHOLE_SIZE },
                     { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPrevPosStrain_.BufferHandle,    VK_WHOLE_SIZE },
                     { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufTetElements_.BufferHandle,      VK_WHOLE_SIZE },
@@ -503,7 +687,7 @@ void DeformableVulkanExecutor::DispatchGpuAsync(const DeformableExternalCoupling
             case DeformableComputePassOrdinal::ContactUpdate:
             {
                 const std::array<ComputeSlotDescriptor, 5> slots {{
-                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo,                              sizeof(DeformableStepUniforms) },
+                    { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, ubo, sizeof(DeformableStepUniforms), uboOffsetBytes },
                     { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPositionsInvMass_.BufferHandle, VK_WHOLE_SIZE },
                     { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPrevPosStrain_.BufferHandle,    VK_WHOLE_SIZE },
                     { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufVelocitiesFlags_.BufferHandle,  VK_WHOLE_SIZE },

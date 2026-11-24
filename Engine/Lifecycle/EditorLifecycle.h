@@ -17,6 +17,7 @@
 #include "Engine/ComponentClass/ComponentClassDefinition.h"
 #include "Engine/ComponentClass/ComponentClassValidator.h"
 #include "Engine/ComponentClass/ComponentWorldPlacement.h"
+#include "Engine/SimulationSpace/EditorSimulationAdapter.h"
 #include "Engine/SimulationSpace/WorldSimulationSession.h"
 #include "Engine/ComponentClass/ControlVehicleClassBuilder.h"
 #include "Engine/Components/Appearance/TypographyRepository.h"
@@ -134,6 +135,11 @@ public:
     [[nodiscard]] bool BeginWorldSimulationFromSceneFile(const std::filesystem::path& ScenePath, std::string* OutError = nullptr);
     [[nodiscard]] bool PauseWorldSimulationPlay() noexcept { return WorldSimulation.Pause(); }
     [[nodiscard]] bool ResumeWorldSimulationPlay() noexcept { return WorldSimulation.Resume(); }
+    [[nodiscard]] bool StepWorldSimulationTick(double FixedDeltaSeconds = 1.0 / 60.0) noexcept
+    {
+        return WorldSimulation.StepSingleTick(
+            FixedDeltaSeconds, { DesiredCameraOrigin.X, DesiredCameraOrigin.Y, DesiredCameraOrigin.Z });
+    }
     void               StopWorldSimulationPlay() noexcept { WorldSimulation.Stop(); }
     [[nodiscard]] const SimulationSpace::WorldSimulationSession& InspectWorldSimulation() const noexcept { return WorldSimulation; }
 
@@ -264,6 +270,7 @@ private:
     ComponentClass::ComponentWorldPlacementRegister     WorldPlacements     {};   // [-]  - Placed ComponentClass instances
     std::vector<OutlinerPlacementLink>                  PlacementLinks      {};   // [-]  - Outliner slot <-> ComponentWorldPlacement map
     SimulationSpace::WorldSimulationSession             WorldSimulation     {};   // [-]  - Live 5-domain Play-in-Editor simulation session
+    SimulationSpace::EditorSimulationAdapter            SimulationAdapter   {};   // [-]  - Isolated Vulkan sim attachment, toolbar sync & overlay pass
     Components::WorkspaceDockPaneToken         OutlinerPaneToken      {};     // [idx]   - Registered left Outliner/LayerStack pane
     Components::WorkspaceDockPaneToken         ViewportPaneToken      {};     // [idx]   - Registered central Viewport pane
     Components::WorkspaceDockPaneToken         InspectorPaneToken     {};     // [idx]   - Registered right Inspector pane

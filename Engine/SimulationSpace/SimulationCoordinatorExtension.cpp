@@ -51,13 +51,14 @@ bool SimulationCoordinatorExtension::Initialize() noexcept
             (void)FluidGpuExecutor_.Initialize(
                 Parameters_.FluidGridCells,
                 Parameters_.FluidCellSizeMeters,
-                Parameters_.FluidCentreMeters);
+                Parameters_.FluidCentreMeters,
+                Parameters_.CompiledShaderDirectory);
         }
 
         if (Parameters_.EnableParticleSolver)
         {
             ParticleSim_.ClearAll();
-            (void)ParticleGpuExecutor_.Initialize(4096u);
+            (void)ParticleGpuExecutor_.Initialize(4096u, Parameters_.CompiledShaderDirectory);
         }
 
         RigidFeedback_.reserve(128u);
@@ -287,9 +288,15 @@ SimulationExecutionRouteSummary SimulationCoordinatorExtension::InspectExecution
 }
 
 #if FRONTIER_FLUID_HAS_VULKAN
-bool SimulationCoordinatorExtension::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+bool SimulationCoordinatorExtension::AttachVulkanInterchange(
+    GeometricRaster::VulkanInterchange* interchange,
+    const std::filesystem::path& compiledShaderDirectory) noexcept
 {
-    const bool defOk      = Deformables_.AttachVulkanInterchange(interchange);
+    if (!compiledShaderDirectory.empty())
+    {
+        Parameters_.CompiledShaderDirectory = compiledShaderDirectory;
+    }
+    const bool defOk      = Deformables_.AttachVulkanInterchange(interchange, Parameters_.CompiledShaderDirectory);
     const bool fluidOk    = FluidGpuExecutor_.AttachVulkanInterchange(interchange);
     const bool particleOk = ParticleGpuExecutor_.AttachVulkanInterchange(interchange);
     return defOk && fluidOk && particleOk;

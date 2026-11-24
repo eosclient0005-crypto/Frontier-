@@ -38,6 +38,7 @@ struct DeformableExtensionParameters
     DeformableWorldCullingPolicy WorldCullingPolicy       {};
     VehicleTireLodPolicy         VehicleLodPolicy         {};
     std::filesystem::path        ShippedVertexAtlasPath   {};
+    std::filesystem::path        CompiledShaderDirectory  = "CompiledShaders";
     bool                         EnableVehicleCoupling    = true;
 };
 
@@ -82,7 +83,9 @@ public:
     [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
 
 #if FRONTIER_DEFORMABLE_HAS_VULKAN
-    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] bool AttachVulkanInterchange(
+        GeometricRaster::VulkanInterchange* interchange,
+        const std::filesystem::path& compiledShaderDirectory = "CompiledShaders") noexcept;
 #endif
 
     // Camera, external ForceField/Jolt coupling, and live vehicle chassis state setters
@@ -98,6 +101,7 @@ public:
     [[nodiscard]] const VehicleDeformableCoupling& InspectVehicleCoupling() const noexcept { return VehicleCoupling_; }
     [[nodiscard]] DeformableVulkanExecutor&        AccessVulkanExecutor() noexcept { return VulkanExecutor_; }
     [[nodiscard]] const DeformableVulkanExecutor&  InspectVulkanExecutor() const noexcept { return VulkanExecutor_; }
+    [[nodiscard]] const DeformableBody&            InspectHeroGpuBody() const noexcept { return HeroGpuBody_; }
 
     // Wait-free cross-thread reading & lock-free directive intake
     [[nodiscard]] bool EnqueueHeroDirective(DeformableControlDirective directive) noexcept;
@@ -116,6 +120,8 @@ private:
     DeformableExtensionParameters               Parameters_       {};
     DeformableWorldRegistry                     WorldRegistry_    {};
     DeformableVulkanExecutor                    VulkanExecutor_   {};
+    DeformableBody                              HeroGpuBody_      {};
+    DeformableSimulationConfiguration           HeroGpuConfig_    {};
     VehicleDeformableCoupling                   VehicleCoupling_  {};
     std::unique_ptr<DeformableThreadExchange>   HeroExchange_     {};
     VehicleChassisCouplingInput                 VehicleInput_     {};

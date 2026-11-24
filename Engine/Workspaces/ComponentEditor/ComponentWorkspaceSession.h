@@ -115,6 +115,12 @@ public:
     void ResetMotionKinematics() noexcept;
     void Tick(double DeltaSeconds) noexcept;
 
+#if FRONTIER_FLUID_HAS_VULKAN
+    [[nodiscard]] bool AttachVulkanInterchange(
+        GeometricRaster::VulkanInterchange* Interchange,
+        const std::filesystem::path&        CompiledShaderDirectory = "CompiledShaders") noexcept;
+#endif
+
     [[nodiscard]] uint64_t ComputeRenderSignature() const noexcept;
 
     // Workspace state

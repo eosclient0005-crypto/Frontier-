@@ -73,6 +73,15 @@ void ComponentWorkspaceSession::AttachRenderer(
     }
 }
 
+#if FRONTIER_FLUID_HAS_VULKAN
+bool ComponentWorkspaceSession::AttachVulkanInterchange(
+    GeometricRaster::VulkanInterchange* Interchange,
+    const std::filesystem::path&        CompiledShaderDirectory) noexcept
+{
+    return SimulationPreview.AttachVulkanInterchange(Interchange, CompiledShaderDirectory);
+}
+#endif
+
 ComponentClassDocument* ComponentWorkspaceSession::AccessActiveDocument() noexcept
 {
     if (Documents.empty() || ActiveDocIndex >= Documents.size())

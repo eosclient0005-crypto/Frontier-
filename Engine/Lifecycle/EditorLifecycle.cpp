@@ -282,6 +282,10 @@ bool EditorLifecycle::AttachVulkanGizmoOverlay(
         }
     }
 
+#if FRONTIER_SIM_OVERLAY_HAS_VULKAN
+    (void)SimulationAdapter.AttachVulkanDevice(WorldSimulation, BoundDevice, CompiledShaderDirectory);
+#endif
+
     WorldTransformGizmo.ConfigureDimensionMode(Editor::GizmoDimensionMode::Spatial3D);
     WorldTransformGizmo.ConfigureHandleFilter(Editor::GizmoHandleFilter::Universal);
     if (ShowcaseBundle != nullptr)
@@ -2137,8 +2141,24 @@ void EditorLifecycle::RefreshGizmoOverlayFromCachedWorld()
             PickY = static_cast<uint32_t>(V * static_cast<float>(std::max(1u, LastTargetHeightPx) - 1u));
         }
 
+        VkImageView ComposedWorldView = LastWorldImageView;
+#if FRONTIER_SIM_OVERLAY_HAS_VULKAN
+        {
+            const auto& Cam = ShowcaseBundle->EditorCamera;
+            SimulationSpace::SimulationOverlayCamera SimCam {};
+            SimCam.EyeMeters       = { Cam.CameraOrigin.X, Cam.CameraOrigin.Y, Cam.CameraOrigin.Z };
+            SimCam.TargetMeters    = { Cam.TargetPoint.X,  Cam.TargetPoint.Y,  Cam.TargetPoint.Z };
+            SimCam.UpAxis          = { Cam.WorldUpAxis.X,  Cam.WorldUpAxis.Y,  Cam.WorldUpAxis.Z };
+            SimCam.VerticalFovRad  = Cam.VerticalFovRadians;
+            SimCam.NearPlaneMeters = Cam.NearClipMeters;
+            SimCam.FarPlaneMeters  = Cam.FarClipMeters;
+            ComposedWorldView = SimulationAdapter.CompositeOverWorldImage(
+                WorldSimulation, LastWorldImageView, LastTargetWidthPx, LastTargetHeightPx, SimCam);
+        }
+#endif
+
         GeometricRaster::WorldGizmoOverlayRasterization::GpuViewportOverlayRequest CompReq {};
-        CompReq.WorldSourceView      = LastWorldImageView;
+        CompReq.WorldSourceView      = ComposedWorldView;
         CompReq.TargetWidthPx        = LastTargetWidthPx;
         CompReq.TargetHeightPx       = LastTargetHeightPx;
         CompReq.Camera               = ShowcaseBundle->EditorCamera;
@@ -2332,8 +2352,24 @@ void EditorLifecycle::RefreshShowcaseViewportRaster()
                 PickY = static_cast<uint32_t>(V * static_cast<float>(std::max(1u, TargetH) - 1u));
             }
 
+            VkImageView ComposedWorldView = WorldView;
+#if FRONTIER_SIM_OVERLAY_HAS_VULKAN
+            {
+                const auto& Cam = ShowcaseBundle->EditorCamera;
+                SimulationSpace::SimulationOverlayCamera SimCam {};
+                SimCam.EyeMeters       = { Cam.CameraOrigin.X, Cam.CameraOrigin.Y, Cam.CameraOrigin.Z };
+                SimCam.TargetMeters    = { Cam.TargetPoint.X,  Cam.TargetPoint.Y,  Cam.TargetPoint.Z };
+                SimCam.UpAxis          = { Cam.WorldUpAxis.X,  Cam.WorldUpAxis.Y,  Cam.WorldUpAxis.Z };
+                SimCam.VerticalFovRad  = Cam.VerticalFovRadians;
+                SimCam.NearPlaneMeters = Cam.NearClipMeters;
+                SimCam.FarPlaneMeters  = Cam.FarClipMeters;
+                ComposedWorldView = SimulationAdapter.CompositeOverWorldImage(
+                    WorldSimulation, WorldView, TargetW, TargetH, SimCam);
+            }
+#endif
+
             GeometricRaster::WorldGizmoOverlayRasterization::GpuViewportOverlayRequest CompReq {};
-            CompReq.WorldSourceView      = WorldView;
+            CompReq.WorldSourceView      = ComposedWorldView;
             CompReq.TargetWidthPx        = TargetW;
             CompReq.TargetHeightPx       = TargetH;
             CompReq.Camera               = ShowcaseBundle->EditorCamera;
@@ -2526,12 +2562,21 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
     CurrentStepSeconds    = SafeStep;
 
     Workspaces.Tick(SafeStep);
-    if (WorldSimulation.QueryPlaying() && SafeStep > 0.0)
+    bool WorldSimStepped = false;
     {
-        const std::array<float, 3> camWorldPos {
-            DesiredCameraOrigin.X, DesiredCameraOrigin.Y, DesiredCameraOrigin.Z
-        };
-        WorldSimulation.Tick(SafeStep, camWorldPos);
+        SimulationSpace::EditorSimulationToolbarState TbState {};
+        TbState.DeltaSeconds      = SafeStep;
+        TbState.CameraWorldMeters = { DesiredCameraOrigin.X, DesiredCameraOrigin.Y, DesiredCameraOrigin.Z };
+        if (WorkspaceSessionPanes* ActivePanes = Workspaces.AccessActivePanes())
+        {
+            TbState.PlayOrSimulateActive = (ActivePanes->Viewport.QueryExecutionMode() != ViewportExecutionMode::Edit);
+            TbState.Paused               = ActivePanes->Viewport.QueryPlayPaused();
+            TbState.StepRequested        = ActivePanes->Viewport.ConsumeSimulationStepRequest();
+        }
+        WorldSimStepped = SimulationAdapter.SynchronizeToolbarControls(
+            WorldSimulation,
+            TbState,
+            [this]() { return BeginWorldSimulationPlay(); });
     }
     if (ShowcaseBundle != nullptr)
     {
@@ -2877,7 +2922,7 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
                  GpuWorldRenderer->QueryProgressiveSampleCount() < DisplayCfg.PathTraceTargetSpp);
             const bool DiagnosticsLiveActive =
                 Panes->Viewport.QueryDiagnosticsVisible() && !Panes->Viewport.QueryDiagnosticsPaused();
-            if (InteractionWorldRefresh || SceneMutated || DisplayChanged || ProgressiveOrder3Active || DiagnosticsLiveActive)
+            if (InteractionWorldRefresh || SceneMutated || WorldSimStepped || DisplayChanged || ProgressiveOrder3Active || DiagnosticsLiveActive)
             {
                 FRONTIER_THOUGHT_SCOPE("Editor.ViewportRaster");
                 RefreshShowcaseViewportRaster();
@@ -3228,6 +3273,7 @@ void EditorLifecycle::Finalize() noexcept
             ActiveExt->RequestCursorConfinement(Input::CursorConfinementMode::FreeVisible);
         }
     }
+    SimulationAdapter.Teardown();
     WorldSimulation.Stop();
     EditorSequence.Finalize();
     if (StartupConfig.ImGuiPresenter != nullptr)

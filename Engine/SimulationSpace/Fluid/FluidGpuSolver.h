@@ -394,6 +394,14 @@ public:
     [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
     [[nodiscard]] VkImageView QueryVelocityImageView() const noexcept { return ImgVelocity_[ActivePong_].ViewHandle; }
     [[nodiscard]] VkImageView QueryStateImageView() const noexcept    { return ImgState_[ActivePong_].ViewHandle; }
+    [[nodiscard]] const GeometricRaster::DeviceImageResource& InspectActiveStateImage() const noexcept
+    {
+        return ImgState_[ActivePong_];
+    }
+    [[nodiscard]] const GeometricRaster::DeviceImageResource& InspectActiveVelocityImage() const noexcept
+    {
+        return ImgVelocity_[ActivePong_];
+    }
 #endif
 
     [[nodiscard]] bool Initialize(
@@ -461,19 +469,19 @@ private:
     GeometricRaster::ComputeDispatchEncoder               Encoder_           {};
     VkSampler                                             LinearSampler_     = VK_NULL_HANDLE;
     uint32_t                                              ActivePong_        = 0u;
-    uint32_t                                              ProgInject_        = 0u;
-    uint32_t                                              ProgAdvect_        = 0u;
-    uint32_t                                              ProgMacCormack_    = 0u;
-    uint32_t                                              ProgThermo_        = 0u;
-    uint32_t                                              ProgForces_        = 0u;
-    uint32_t                                              ProgCurl_          = 0u;
-    uint32_t                                              ProgVorticity_     = 0u;
-    uint32_t                                              ProgDivergence_    = 0u;
-    uint32_t                                              ProgPressure_      = 0u;
-    uint32_t                                              ProgGradient_      = 0u;
-    uint32_t                                              ProgOccupancy_     = 0u;
-    uint32_t                                              ProgTracerUpdate_  = 0u;
-    uint32_t                                              ProgDebrisUpdate_  = 0u;
+    uint32_t                                              ProgInject_        = UINT32_MAX;
+    uint32_t                                              ProgAdvect_        = UINT32_MAX;
+    uint32_t                                              ProgMacCormack_    = UINT32_MAX;
+    uint32_t                                              ProgThermo_        = UINT32_MAX;
+    uint32_t                                              ProgForces_        = UINT32_MAX;
+    uint32_t                                              ProgCurl_          = UINT32_MAX;
+    uint32_t                                              ProgVorticity_     = UINT32_MAX;
+    uint32_t                                              ProgDivergence_    = UINT32_MAX;
+    uint32_t                                              ProgPressure_      = UINT32_MAX;
+    uint32_t                                              ProgGradient_      = UINT32_MAX;
+    uint32_t                                              ProgOccupancy_     = UINT32_MAX;
+    uint32_t                                              ProgTracerUpdate_  = UINT32_MAX;
+    uint32_t                                              ProgDebrisUpdate_  = UINT32_MAX;
     std::array<GeometricRaster::DeviceImageResource, 2>   ImgVelocity_       {};
     std::array<GeometricRaster::DeviceImageResource, 2>   ImgState_          {};
     std::array<GeometricRaster::DeviceImageResource, 2>   ImgPressure_       {};
@@ -481,23 +489,28 @@ private:
     GeometricRaster::DeviceImageResource                  ImgDivergence_     {};
     GeometricRaster::DeviceImageResource                  ImgScratchA_       {};
     GeometricRaster::DeviceImageResource                  ImgScratchB_       {};
+    GeometricRaster::DeviceImageResource                  ImgDummy2DFloat_   {};
+    GeometricRaster::DeviceImageResource                  ImgDummy2DInt_     {};
     GeometricRaster::DeviceBufferResource                 BufForceRecords_   {};
     GeometricRaster::DeviceBufferResource                 BufOccupancy_      {};
     std::array<GeometricRaster::DeviceBufferResource, 2>  BufTracers_        {};
     std::array<GeometricRaster::DeviceBufferResource, 2>  BufDebrisPos_      {};
     std::array<GeometricRaster::DeviceBufferResource, 2>  BufDebrisVel_      {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufInjectUbo_   {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufAdvectUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufInjectUbo_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufInjectVelUbo_ {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufAdvectUbo_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufAdvectBwdUbo_ {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufMacCormackUbo_{};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufThermoUbo_   {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufForcesUbo_   {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufVortUbo_     {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDivUbo_      {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufPressUbo_    {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufGradUbo_     {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufTracerUbo_   {};
-    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDebrisUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufThermoUbo_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufForcesUbo_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufVortUbo_      {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDivUbo_       {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufPressUbo_     {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufGradUbo_      {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufTracerUbo_    {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDebrisUbo_    {};
     std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
+    PendingCmd                                            InitCommand_       {};
 #endif
 };
 

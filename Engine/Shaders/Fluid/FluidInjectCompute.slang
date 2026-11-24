@@ -26,7 +26,7 @@ public struct FluidInjectUniformBlock
 
 [[vk::binding(0, 0)]] ConstantBuffer<FluidInjectUniformBlock> uParams;
 [[vk::binding(1, 0)]] Texture3D<float4>                       gTarget;
-[[vk::binding(2, 0)]] RWTexture3D<float4>                     gOutput;
+[[vk::binding(2, 0)]] [format("rgba16f")] RWTexture3D<float4>                     gOutput;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      MASK EVALUATION
@@ -100,26 +100,26 @@ void ComputeEntry(uint3 dispatchThreadId : SV_DispatchThreadID)
     float dt        = uParams.InjectTiming.z;
     float blend     = min(1.0, dt * 10.0);
 
-    for (int i = 0; i < kMaxFluidReleaseSources; ++i)
+    for (int i = 0; i < sourceCount; ++i)
     {
-        if (i >= sourceCount) break;
         float mask = EvaluateReleaseSourceMask(i, world);
-        if (mask <= 0.0) continue;
-
-        float4 b = uParams.SourceVelDensity[i];
-        float4 c = uParams.SourceTempFuelShape[i];
-        if (mode == 0)
+        if (mask > 0.0)
         {
-            if (dot(b.xyz, b.xyz) > 0.0)
+            float4 b = uParams.SourceVelDensity[i];
+            float4 c = uParams.SourceTempFuelShape[i];
+            if (mode == 0)
             {
-                value.xyz = lerp(value.xyz, b.xyz, mask * blend);
+                if (dot(b.xyz, b.xyz) > 0.0)
+                {
+                    value.xyz = lerp(value.xyz, b.xyz, mask * blend);
+                }
             }
-        }
-        else
-        {
-            value.x = min(value.x + mask * b.w * dt * 6.0, max(value.x, b.w * 1.5));
-            value.y = lerp(value.y, max(value.y, c.x), mask * blend);
-            value.z = min(value.z + mask * c.y * dt * 6.0, max(value.z, c.y * 1.5));
+            else
+            {
+                value.x = min(value.x + mask * b.w * dt * 6.0, max(value.x, b.w * 1.5));
+                value.y = lerp(value.y, max(value.y, c.x), mask * blend);
+                value.z = min(value.z + mask * c.y * dt * 6.0, max(value.z, c.y * 1.5));
+            }
         }
     }
 

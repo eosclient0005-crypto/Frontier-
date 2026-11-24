@@ -83,14 +83,22 @@ void DeformableWorldRegistry::InitializeInstanceExecutor(DeformableWorldInstance
     {
         (void)inst.GpuExecutor->AttachVulkanInterchange(Interchange_);
     }
-#endif
+    (void)inst.GpuExecutor->InitializeForBody(inst.Body, inst.Configuration, CompiledShaderDirectory_);
+#else
     (void)inst.GpuExecutor->InitializeForBody(inst.Body, inst.Configuration);
+#endif
 }
 
 #if FRONTIER_DEFORMABLE_HAS_VULKAN
-bool DeformableWorldRegistry::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+bool DeformableWorldRegistry::AttachVulkanInterchange(
+    GeometricRaster::VulkanInterchange* interchange,
+    const std::filesystem::path& compiledShaderDirectory) noexcept
 {
     Interchange_ = interchange;
+    if (!compiledShaderDirectory.empty())
+    {
+        CompiledShaderDirectory_ = compiledShaderDirectory;
+    }
     bool allOk = (interchange != nullptr && interchange->Ready());
     for (auto& inst : Instances_)
     {
@@ -99,7 +107,7 @@ bool DeformableWorldRegistry::AttachVulkanInterchange(GeometricRaster::VulkanInt
             inst.GpuExecutor = std::make_unique<DeformableVulkanExecutor>();
         }
         const bool attached = inst.GpuExecutor->AttachVulkanInterchange(interchange);
-        const bool inited   = inst.GpuExecutor->InitializeForBody(inst.Body, inst.Configuration);
+        const bool inited   = inst.GpuExecutor->InitializeForBody(inst.Body, inst.Configuration, CompiledShaderDirectory_);
         allOk = allOk && attached && inited;
     }
     return allOk;

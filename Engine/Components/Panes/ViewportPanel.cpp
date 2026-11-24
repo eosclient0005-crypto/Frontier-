@@ -2626,6 +2626,45 @@ void ViewportPanel::Render(
         {
             ConfigureExecutionMode(static_cast<ViewportExecutionMode>(StripResult.SelectedPhase), false);
         }
+
+        // Play/Pause/Step/Stop toolbar controls next to the execution strip while Play or Simulate is active
+        if (ExecutionMode != ViewportExecutionMode::Edit)
+        {
+            float RightEdgeX = StripBounds.X - 8.0f;
+            const Rectangle2D StopBtn{ RightEdgeX - 54.0f, StripBounds.Y, 54.0f, StripBounds.Height };
+            const bool StopHover = !OverlayOpenBefore && StopBtn.Contains(Cursor);
+            Surface.FillRectangle(
+                StopBtn,
+                StopHover ? ColorRgba{ 165, 52, 48, 235 } : ColorRgba{ 46, 30, 32, 225 },
+                StripBounds.Height * 0.5f);
+            Surface.StrokeRectangle(StopBtn, ColorRgba{ 235, 110, 100, 110 }, StripBounds.Height * 0.5f, 1.0f);
+            WorkspaceAppearance::ConstructWeightedText(
+                Surface, FontWeightClass::Medium, { StopBtn.X + 13.0f, StopBtn.Y + 7.5f }, 11.5f,
+                ColorRgba{ 245, 228, 225, 255 }, "Stop");
+            if (StopHover && Input.PrimaryPointer.Pressed)
+            {
+                ConfigureExecutionMode(ViewportExecutionMode::Edit, false);
+            }
+
+            if (PlayPaused)
+            {
+                RightEdgeX = StopBtn.X - 6.0f;
+                const Rectangle2D StepBtn{ RightEdgeX - 54.0f, StripBounds.Y, 54.0f, StripBounds.Height };
+                const bool StepHover = !OverlayOpenBefore && StepBtn.Contains(Cursor);
+                Surface.FillRectangle(
+                    StepBtn,
+                    StepHover ? ColorRgba{ 58, 92, 138, 235 } : ColorRgba{ 30, 38, 52, 225 },
+                    StripBounds.Height * 0.5f);
+                Surface.StrokeRectangle(StepBtn, ColorRgba{ 130, 185, 245, 115 }, StripBounds.Height * 0.5f, 1.0f);
+                WorkspaceAppearance::ConstructWeightedText(
+                    Surface, FontWeightClass::Medium, { StepBtn.X + 13.0f, StepBtn.Y + 7.5f }, 11.5f,
+                    ColorRgba{ 225, 238, 255, 255 }, "Step");
+                if (StepHover && Input.PrimaryPointer.Pressed)
+                {
+                    RequestSimulationStep();
+                }
+            }
+        }
     }
 
     // 1c. Secondary Toolbar Row (31px capsule controls below subtle separator)

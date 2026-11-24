@@ -10,8 +10,8 @@
 [[vk::binding(1, 0)]] StructuredBuffer<float4>                  gCagePositions;    // xyz = live cage point position, w = strain
 [[vk::binding(2, 0)]] StructuredBuffer<float4>                  gTetCofactorCols;  // 3 x float4 per tet (cof(F) cols 0,1,2)
 [[vk::binding(3, 0)]] StructuredBuffer<CageBoundVertexGpu>      gBoundVertices;
-[[vk::binding(4, 0)]] RWTexture2D<float4>                       gVatPosStrainOut;  // RGBA32F target: rgb = worldPos, a = strain
-[[vk::binding(5, 0)]] RWTexture2D<float4>                       gVatNormalOut;     // RGBA32F target: rgb = worldUnitNormal, a = 0
+[[vk::binding(4, 0)]] [format("rgba32f")] RWTexture2D<float4>                       gVatPosStrainOut;  // RGBA32F target: rgb = worldPos, a = strain
+[[vk::binding(5, 0)]] [format("rgba32f")] RWTexture2D<float4>                       gVatNormalOut;     // RGBA32F target: rgb = worldUnitNormal, a = 0
 
 [shader("compute")]
 [numthreads(64, 1, 1)]

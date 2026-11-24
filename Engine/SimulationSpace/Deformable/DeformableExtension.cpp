@@ -43,10 +43,8 @@ bool DeformableExtension::Initialize() noexcept
 
         HeroExchange_ = std::make_unique<DeformableThreadExchange>(Parameters_.HeroExchangePreset);
 
-        DeformableBody executorSeed {};
-        DeformableSimulationConfiguration executorCfg {};
-        DeformablePresetRegistry::BuildPreset(Parameters_.HeroExchangePreset, executorSeed, executorCfg);
-        (void)VulkanExecutor_.InitializeForBody(executorSeed, executorCfg);
+        DeformablePresetRegistry::BuildPreset(Parameters_.HeroExchangePreset, HeroGpuBody_, HeroGpuConfig_);
+        (void)VulkanExecutor_.InitializeForBody(HeroGpuBody_, HeroGpuConfig_, Parameters_.CompiledShaderDirectory);
 
         Telemetry_ = {};
         if (Parameters_.EnableVehicleCoupling)
@@ -101,6 +99,12 @@ void DeformableExtension::Tick(double deltaSeconds) noexcept
                 Telemetry_.HeroPublishedGeneration = HeroExchange_->QueryPublishedGeneration();
             }
 
+            if (VulkanExecutor_.Ready())
+            {
+                (void)VulkanExecutor_.ExecuteTickInPlace(
+                    HeroGpuBody_, dtF, HeroGpuConfig_, simT, WindPulse_, ExternalCoupling_);
+            }
+
             Telemetry_.LastWorldSummary = WorldRegistry_.StepWorld(
                 dtF, simT, CameraWorldPos_, WindPulse_, ExternalCoupling_);
 
@@ -149,10 +153,20 @@ void DeformableExtension::Finalize() noexcept
 }
 
 #if FRONTIER_DEFORMABLE_HAS_VULKAN
-bool DeformableExtension::AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept
+bool DeformableExtension::AttachVulkanInterchange(
+    GeometricRaster::VulkanInterchange* interchange,
+    const std::filesystem::path& compiledShaderDirectory) noexcept
 {
+    if (!compiledShaderDirectory.empty())
+    {
+        Parameters_.CompiledShaderDirectory = compiledShaderDirectory;
+    }
     const bool execOk  = VulkanExecutor_.AttachVulkanInterchange(interchange);
-    const bool worldOk = WorldRegistry_.AttachVulkanInterchange(interchange);
+    const bool worldOk = WorldRegistry_.AttachVulkanInterchange(interchange, Parameters_.CompiledShaderDirectory);
+    if (Initialized_ && execOk && HeroGpuBody_.PointCount > 0u)
+    {
+        (void)VulkanExecutor_.InitializeForBody(HeroGpuBody_, HeroGpuConfig_, Parameters_.CompiledShaderDirectory);
+    }
     return execOk && worldOk;
 }
 #endif

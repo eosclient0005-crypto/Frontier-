@@ -24,7 +24,7 @@ public struct FluidPressureUniformBlock
 [[vk::binding(3, 0)]] Texture3D<float4>                           gState;
 [[vk::binding(4, 0)]] Texture3D<float4>                           gPressure;
 [[vk::binding(5, 0)]] Texture3D<float4>                           gDivergence;
-[[vk::binding(6, 0)]] RWTexture3D<float4>                         gOutput;
+[[vk::binding(6, 0)]] [format("rgba16f")] RWTexture3D<float4>                         gOutput;
 
 float SampleVelocityAxisComponent(
     FluidVolumeUniformBlock vol,

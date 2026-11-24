@@ -14,7 +14,7 @@ public struct FluidThermodynamicsUniformBlock
 
 [[vk::binding(0, 0)]] ConstantBuffer<FluidThermodynamicsUniformBlock> uParams;
 [[vk::binding(1, 0)]] Texture3D<float4>                               gState;
-[[vk::binding(2, 0)]] RWTexture3D<float4>                             gOutputState;
+[[vk::binding(2, 0)]] [format("rgba16f")] RWTexture3D<float4>                             gOutputState;
 
 float EvaluateOutflowSponge(FluidVolumeUniformBlock vol, int3 cell)
 {

@@ -80,7 +80,9 @@ public:
 
 #if FRONTIER_DEFORMABLE_HAS_VULKAN
     /// Attaches a live Vulkan 1.2 interchange to all existing and future world deformable executors.
-    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] bool AttachVulkanInterchange(
+        GeometricRaster::VulkanInterchange* interchange,
+        const std::filesystem::path& compiledShaderDirectory = "CompiledShaders") noexcept;
 #endif
 
     /// Spawns a new deformable instance from one of the 9 built-in DeformablePresetKind presets at `worldOriginMeters`.
@@ -122,7 +124,8 @@ private:
 
     DeformableWorldCullingPolicy         Policy_          {};
 #if FRONTIER_DEFORMABLE_HAS_VULKAN
-    GeometricRaster::VulkanInterchange*  Interchange_     = nullptr;
+    GeometricRaster::VulkanInterchange*  Interchange_             = nullptr;
+    std::filesystem::path                CompiledShaderDirectory_ = "CompiledShaders";
 #endif
     std::vector<DeformableWorldInstance> Instances_       {};
     uint32_t                             NextInstanceId_  = 1u;

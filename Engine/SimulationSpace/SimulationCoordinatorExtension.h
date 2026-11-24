@@ -48,6 +48,7 @@ struct SimulationCoordinatorParameters
     Fluid::FluidStepSettings                 FluidSettings           {};
     Deformable::DeformableExtensionParameters DeformableParameters   {};
     float                                    DeformableImpulseGain   = 18.0f;
+    std::filesystem::path                    CompiledShaderDirectory = "CompiledShaders";
 };
 
 struct SimulationCoordinatorTelemetry
@@ -107,7 +108,9 @@ public:
     [[nodiscard]] bool QueryShouldUpdate() const noexcept { return ShouldUpdate_; }
 
 #if FRONTIER_FLUID_HAS_VULKAN
-    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] bool AttachVulkanInterchange(
+        GeometricRaster::VulkanInterchange* interchange,
+        const std::filesystem::path& compiledShaderDirectory = "CompiledShaders") noexcept;
 #endif
 
     /// Honest consolidated execution route summary across Deformable, Fluid, and Particle GPU executors.

@@ -1183,6 +1183,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/WorldSimulationSession.cpp
     Engine/SimulationSpace/DualLoopSimulationPools.cpp
     Engine/SimulationSpace/SimulationGpuRenderFeed.cpp
+    Engine/SimulationSpace/SimulationViewportOverlayPass.cpp
+    Engine/SimulationSpace/EditorSimulationAdapter.cpp
     Engine/SimulationSpace/SimulationCheckpointBuffer.cpp
     Engine/SimulationSpace/SimulationBudgetGovernor.cpp
     Engine/SimulationSpace/SimulationTelemetryProfiler.cpp
@@ -1517,6 +1519,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(SimulationPhaseKValidation                Exhibits/SimulationPhaseKValidation.cpp)
     frontier_register_exhibit(SimulationPhaseLValidation                Exhibits/SimulationPhaseLValidation.cpp)
     frontier_register_exhibit(SimulationPhaseMValidation                Exhibits/SimulationPhaseMValidation.cpp)
+    frontier_register_exhibit(SimulationLiveVulkanValidation            Exhibits/SimulationLiveVulkanValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)

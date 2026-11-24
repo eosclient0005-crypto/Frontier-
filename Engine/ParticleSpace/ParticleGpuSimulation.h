@@ -336,6 +336,7 @@ struct ParticleGpuRenderFeedHandle
     uint64_t               LastSubmittedTimeline = 0ull;
     uint64_t               StateBufferHandle     = 0ull; // VkBuffer cast to uint64_t (0 when headless)
     uint64_t               PrevPosBufferHandle   = 0ull; // VkBuffer cast to uint64_t (0 when headless)
+    uint64_t               AnchorBufferHandle    = 0ull; // VkBuffer cast to uint64_t (0 when headless)
     uint64_t               ImpulseBufferHandle   = 0ull; // VkBuffer cast to uint64_t (0 when headless)
     bool                   GpuResident           = false;
 };
@@ -427,6 +428,13 @@ public:
     [[nodiscard]] bool Ready() const noexcept { return Initialized_; }
     [[nodiscard]] const ParticleGpuExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
 
+#if FRONTIER_PARTICLE_HAS_VULKAN
+    [[nodiscard]] const GeometricRaster::DeviceBufferResource& InspectActiveStateBuffer() const noexcept
+    {
+        return BufStates_[ActivePong_];
+    }
+#endif
+
 private:
     uint32_t                         MaxParticleCapacity_       = 4096u;
     uint32_t                         ActivePong_                = 0u;
@@ -466,23 +474,23 @@ private:
     GeometricRaster::VulkanInterchange*                   Interchange_       = nullptr;
     GeometricRaster::ComputeDispatchEncoder               Encoder_           {};
     VkSampler                                             LinearSampler_     = VK_NULL_HANDLE;
-    uint32_t                                              ProgUpdate_        = 0u;
-    uint32_t                                              ProgTrail_         = 0u;
-    uint32_t                                              ProgCollision_     = 0u;
-    uint32_t                                              ProgHashClear_     = 0u;
-    uint32_t                                              ProgHashCount_     = 0u;
-    uint32_t                                              ProgHashScanLocal_ = 0u;
-    uint32_t                                              ProgHashScanBlocks_= 0u;
-    uint32_t                                              ProgHashScanAdd_   = 0u;
-    uint32_t                                              ProgHashScatter_   = 0u;
-    uint32_t                                              ProgHashResolve_   = 0u;
-    uint32_t                                              ProgXpbdPredict_   = 0u;
-    uint32_t                                              ProgXpbdResetDual_ = 0u;
-    uint32_t                                              ProgXpbdDistance_  = 0u;
-    uint32_t                                              ProgXpbdSeam_      = 0u;
-    uint32_t                                              ProgXpbdFace_      = 0u;
-    uint32_t                                              ProgXpbdHinge_     = 0u;
-    uint32_t                                              ProgXpbdFinalize_  = 0u;
+    uint32_t                                              ProgUpdate_        = UINT32_MAX;
+    uint32_t                                              ProgTrail_         = UINT32_MAX;
+    uint32_t                                              ProgCollision_     = UINT32_MAX;
+    uint32_t                                              ProgHashClear_     = UINT32_MAX;
+    uint32_t                                              ProgHashCount_     = UINT32_MAX;
+    uint32_t                                              ProgHashScanLocal_ = UINT32_MAX;
+    uint32_t                                              ProgHashScanBlocks_= UINT32_MAX;
+    uint32_t                                              ProgHashScanAdd_   = UINT32_MAX;
+    uint32_t                                              ProgHashScatter_   = UINT32_MAX;
+    uint32_t                                              ProgHashResolve_   = UINT32_MAX;
+    uint32_t                                              ProgXpbdPredict_   = UINT32_MAX;
+    uint32_t                                              ProgXpbdResetDual_ = UINT32_MAX;
+    uint32_t                                              ProgXpbdDistance_  = UINT32_MAX;
+    uint32_t                                              ProgXpbdSeam_      = UINT32_MAX;
+    uint32_t                                              ProgXpbdFace_      = UINT32_MAX;
+    uint32_t                                              ProgXpbdHinge_     = UINT32_MAX;
+    uint32_t                                              ProgXpbdFinalize_  = UINT32_MAX;
     std::array<GeometricRaster::DeviceBufferResource, 2>  BufStates_         {};
     GeometricRaster::DeviceBufferResource                 BufPrevPos_        {};
     GeometricRaster::DeviceBufferResource                 BufAnchors_        {};
@@ -510,6 +518,7 @@ private:
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufHashUbo_ {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufXpbdUbo_ {};
     std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
+    PendingCmd                                            InitCommand_       {};
 #endif
 };
 

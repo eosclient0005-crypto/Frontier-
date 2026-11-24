@@ -83,7 +83,9 @@ public:
 
 #if FRONTIER_FLUID_HAS_VULKAN
     /// Attaches a live Vulkan 1.2 interchange for Deformable, Fluid, and Particle async GPU execution.
-    [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] bool AttachVulkanInterchange(
+        GeometricRaster::VulkanInterchange* interchange,
+        const std::filesystem::path& compiledShaderDirectory = "CompiledShaders") noexcept;
 #endif
 
     [[nodiscard]] PreviewRunStatus QueryStatus() const noexcept { return RunStatus_; }
@@ -103,7 +105,8 @@ private:
     PreviewRunStatus                                RunStatus_      = PreviewRunStatus::Idle;
     bool                                            ShouldUpdate_   = true;
 #if FRONTIER_FLUID_HAS_VULKAN
-    GeometricRaster::VulkanInterchange*             Interchange_    = nullptr;
+    GeometricRaster::VulkanInterchange*             Interchange_             = nullptr;
+    std::filesystem::path                           CompiledShaderDirectory_ = "CompiledShaders";
 #endif
     uint64_t                                        BoundRevision_  = 0ull;
     PrefabAssemblyReport                            AssemblyReport_ {};

@@ -15,7 +15,7 @@ public struct FluidVorticityUniformBlock
 [[vk::binding(0, 0)]] ConstantBuffer<FluidVorticityUniformBlock> uParams;
 [[vk::binding(1, 0)]] Texture3D<float4>                          gVelocity;
 [[vk::binding(2, 0)]] Texture3D<float4>                          gCurl;
-[[vk::binding(3, 0)]] RWTexture3D<float4>                        gOutput;
+[[vk::binding(3, 0)]] [format("rgba16f")] RWTexture3D<float4>                        gOutput;
 
 [shader("compute")]
 [numthreads(8, 8, 4)]

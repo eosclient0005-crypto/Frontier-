@@ -177,6 +177,13 @@ public:
     void ConfigureSceneTitle(std::string_view Title);
     void ConfigureExecutionMode(ViewportExecutionMode Mode, bool Paused = false) noexcept;
     void TogglePlayPause() noexcept;
+    void RequestSimulationStep() noexcept { StepRequested = true; }
+    [[nodiscard]] bool ConsumeSimulationStepRequest() noexcept
+    {
+        const bool pending = StepRequested;
+        StepRequested = false;
+        return pending;
+    }
     void ConfigureSplitViewport(bool SplitEnabled) noexcept;
     void ConfigureDiagnosticsVisible(bool Visible) noexcept;
     void AdvanceDebugChannelCycle() noexcept { DisplaySettings.DebugChannelIndex = (DisplaySettings.DebugChannelIndex + 1u) % 23u; }
@@ -248,6 +255,7 @@ private:
     std::string                SceneTitle              = "Scene";                                 // [-]   - Viewport identity heading
     ViewportExecutionMode      ExecutionMode           = ViewportExecutionMode::Edit;             // [-]   - Active Edit/Simulate/Play mode
     bool                       PlayPaused              = false;                                   // [-]   - Play session paused indicator
+    bool                       StepRequested           = false;                                   // [-]   - One-shot single-tick step trigger from toolbar
     bool                       SplitViewportEnabled    = false;                                   // [-]   - Dual side-by-side viewport toggle
     bool                       DiagnosticsVisible      = false;                                   // [-]   - Diagnostics overlay active
     bool                       RenderSettingsSheetOpen       = false;                                   // [-]   - Dedicated Render Settings panel open

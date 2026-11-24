@@ -63,6 +63,8 @@ public:
 
 #if FRONTIER_VATBAKER_HAS_VULKAN
     [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] const GeometricRaster::DeviceImageResource& InspectVatPosImage() const noexcept { return ImgVatPosOut_; }
+    [[nodiscard]] const GeometricRaster::DeviceImageResource& InspectVatNrmImage() const noexcept { return ImgVatNrmOut_; }
 #endif
 
     [[nodiscard]] bool Initialize(const std::filesystem::path& compiledShaderDirectory = "CompiledShaders");
@@ -97,7 +99,7 @@ private:
 
     GeometricRaster::VulkanInterchange*        Interchange_      = nullptr;
     GeometricRaster::ComputeDispatchEncoder    Encoder_          {};
-    uint32_t                                   ProgVatBake_      = 0u;
+    uint32_t                                   ProgVatBake_      = UINT32_MAX;
     uint32_t                                   ActiveSlot_       = 0u;
     GeometricRaster::DeviceBufferResource      BufVatUbo_        {};
     GeometricRaster::DeviceBufferResource      BufCagePos_       {};

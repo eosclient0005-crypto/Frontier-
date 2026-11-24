@@ -20,7 +20,7 @@ public struct FluidAdvectUniformBlock
 [[vk::binding(0, 0)]] ConstantBuffer<FluidAdvectUniformBlock> uParams;
 [[vk::binding(1, 0)]] Texture3D<float4>                       gVelocity;
 [[vk::binding(2, 0)]] Texture3D<float4>                       gSource;
-[[vk::binding(3, 0)]] RWTexture3D<float4>                     gOutput;
+[[vk::binding(3, 0)]] [format("rgba16f")] RWTexture3D<float4>                     gOutput;
 [[vk::binding(4, 0)]] SamplerState                            gLinearClamp;
 
 //------------------------------------------------------------------------------------------------------------------------

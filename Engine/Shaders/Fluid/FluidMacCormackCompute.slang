@@ -22,7 +22,7 @@ public struct FluidMacCormackUniformBlock
 [[vk::binding(2, 0)]] Texture3D<float4>                           gSource;   // phi_n
 [[vk::binding(3, 0)]] Texture3D<float4>                           gForward;  // phi_hat_{n+1}
 [[vk::binding(4, 0)]] Texture3D<float4>                           gBackward; // phi_hat_n
-[[vk::binding(5, 0)]] RWTexture3D<float4>                         gOutput;
+[[vk::binding(5, 0)]] [format("rgba16f")] RWTexture3D<float4>                         gOutput;
 [[vk::binding(6, 0)]] SamplerState                                gLinearClamp;
 
 //------------------------------------------------------------------------------------------------------------------------

@@ -150,6 +150,14 @@ public:
     /// Attaches a live VulkanInterchange. Note: Telemetry_.Route stays HeadlessCpuMirror until InitializeForBody()
     /// successfully allocates real GPU SSBOs and registers compiled .slang SPIR-V compute pipelines.
     [[nodiscard]] bool AttachVulkanInterchange(GeometricRaster::VulkanInterchange* interchange) noexcept;
+    [[nodiscard]] const GeometricRaster::DeviceBufferResource& InspectPositionsBuffer() const noexcept
+    {
+        return BufPositionsInvMass_;
+    }
+    [[nodiscard]] const GeometricRaster::DeviceBufferResource& InspectVelocitiesBuffer() const noexcept
+    {
+        return BufVelocitiesFlags_;
+    }
 #endif
 
 private:
@@ -175,18 +183,26 @@ private:
         const DeformableGpuBufferPack& seedPack,
         const std::filesystem::path& shaderDir);
     void ReleaseGpuResources() noexcept;
-    void DispatchGpuAsync(const DeformableExternalCoupling* externalCoupling) noexcept;
+    void DispatchGpuAsync(
+        const DeformableBody& body,
+        const DeformableSimulationConfiguration& configuration,
+        float subDt,
+        float simTimeSeconds,
+        const DeformableExternalCoupling* externalCoupling) noexcept;
 
     GeometricRaster::VulkanInterchange*                                   Interchange_          = nullptr;
     GeometricRaster::ComputeDispatchEncoder                               Encoder_              {};
-    uint32_t                                                              ProgPredict_          = 0u;
-    uint32_t                                                              ProgDistance_         = 0u;
-    uint32_t                                                              ProgBend_             = 0u;
-    uint32_t                                                              ProgNeoHookean_       = 0u;
-    uint32_t                                                              ProgContact_          = 0u;
-    uint32_t                                                              ProgVatBake_          = 0u;
+    uint32_t                                                              ProgPredict_          = UINT32_MAX;
+    uint32_t                                                              ProgDistance_         = UINT32_MAX;
+    uint32_t                                                              ProgBend_             = UINT32_MAX;
+    uint32_t                                                              ProgNeoHookean_       = UINT32_MAX;
+    uint32_t                                                              ProgContact_          = UINT32_MAX;
+    uint32_t                                                              ProgVatBake_          = UINT32_MAX;
+    static constexpr uint32_t kStepUboStrideBytes = 256u;
+    static constexpr uint32_t kMaxStepUboSlices   = 256u;
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> UniformBuffers_       {};
     std::array<PendingCommandSlot, kTripleBufferSlots>                    InFlightCommands_     {};
+    PendingCommandSlot                                                    InitCommand_          {};
     GeometricRaster::DeviceBufferResource                                 BufPositionsInvMass_  {};
     GeometricRaster::DeviceBufferResource                                 BufPrevPosStrain_     {};
     GeometricRaster::DeviceBufferResource                                 BufVelocitiesFlags_   {};

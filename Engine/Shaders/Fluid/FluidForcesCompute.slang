@@ -24,7 +24,7 @@ public struct FluidForcesUniformBlock
 [[vk::binding(1, 0)]] Texture3D<float4>                       gVelocity;
 [[vk::binding(2, 0)]] Texture3D<float4>                       gState;
 [[vk::binding(3, 0)]] StructuredBuffer<ForceModelGpuRecord>   gForceRecords;
-[[vk::binding(4, 0)]] RWTexture3D<float4>                     gOutput;
+[[vk::binding(4, 0)]] [format("rgba16f")] RWTexture3D<float4>                     gOutput;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                      COMPUTE ENTRY
