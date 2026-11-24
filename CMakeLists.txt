@@ -617,13 +617,17 @@ function(frontier_compile_particlespace_slang_shader SLANG_REL_PATH ENTRY_NAME S
             "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceFieldNoise.slang"
             "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceModelEvaluation.slang"
             "${CMAKE_SOURCE_DIR}/Engine/Shaders/ParticleSpace/ParticleShapeAnchor.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ParticleSpace/ParticleShadingCommon.slang"
         COMMENT "[Slang] Compiling ParticleSpace/${SLANG_REL_PATH} (${SHADER_UNIT}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
         VERBATIM
     )
     set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
 endfunction()
 
-frontier_compile_particlespace_slang_shader(ParticleUpdateCompute.slang ComputeEntry compute ParticleUpdateCompute.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleUpdateCompute.slang       ComputeEntry                compute  ParticleUpdateCompute.comp.spv)
+frontier_compile_particlespace_slang_shader(ParticleSpriteRasterization.slang ParticleSpriteVertexEntry   vertex   ParticleSpriteQuad.vert.spv)
+frontier_compile_particlespace_slang_shader(ParticleSpriteRasterization.slang ParticleStreakVertexEntry   vertex   ParticleSpriteStreak.vert.spv)
+frontier_compile_particlespace_slang_shader(ParticleSpriteRasterization.slang ParticleSpriteFragmentEntry fragment ParticleSprite.frag.spv)
 
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
@@ -1018,6 +1022,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ParticleSpace/ParticleTemplateRegistry.cpp
     Engine/ParticleSpace/CarrierSolidRegistry.cpp
     Engine/ParticleSpace/ParticleGpuSimulation.cpp
+    Engine/ParticleSpace/ParticleGpuRenderer.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
