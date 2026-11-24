@@ -593,17 +593,14 @@ class XpbdWorld {
     for (let s = 0; s < substeps; s++) {
       const subT = timeSec + s * h;
 
-      // 0. Pneumatic XPBD Tire: rotate rim beads, apply Boyle's-law internal inflation pressure & hub suspension
+      // 0. Pneumatic XPBD Tire: co-rotating rim beads, Boyle-bulge pneumatic inflation & axle suspension
       for (const ty of this.tyres) {
         const S = ty.sectors, P = ty.profile, base = ty.startIdx;
         const spin = cfg.tyreSpin;
         ty.spinAngle += spin * h;
-        const cs = Math.cos(ty.spinAngle), sn = Math.sin(ty.spinAngle);
 
-        // Compute enclosed tire volume & per-quad outward pneumatic pressure forces!
+        // Compute enclosed volume to drive real Boyle's-law sidewall bulge when compressed!
         let curVol = 0.0;
-        const pForce = ty.pForce;
-        pForce.fill(0);
         const hx = ty.hubX, hy = ty.hubY, hz = ty.hubZ;
         for (let si = 0; si < S; si++) {
           const sNext = (si + 1) % S;
@@ -615,71 +612,36 @@ class XpbdWorld {
             const a3 = i00*3, b3 = i10*3, c3 = i11*3, d3 = i01*3;
             const ux = pos[c3] - pos[a3], uy = pos[c3+1] - pos[a3+1], uz = pos[c3+2] - pos[a3+2];
             const vx = pos[d3] - pos[b3], vy = pos[d3+1] - pos[b3+1], vz = pos[d3+2] - pos[b3+2];
-            // Outward area-weighted normal vector = 0.5 * (u x v)
             let nx = 0.5 * (uy*vz - uz*vy);
             let ny = 0.5 * (uz*vx - ux*vz);
             let nz = 0.5 * (ux*vy - uy*vx);
-            // Verify outward orientation relative to rim centerline circle
             const mx = 0.25*(pos[a3]+pos[b3]+pos[c3]+pos[d3]) - hx;
             const my = 0.25*(pos[a3+1]+pos[b3+1]+pos[c3+1]+pos[d3+1]) - hy;
             const mz = 0.25*(pos[a3+2]+pos[b3+2]+pos[c3+2]+pos[d3+2]) - hz;
             const rLen = Math.hypot(mx, my) || 1;
-            const crx = (mx / rLen) * ty.rimR, cry = (my / rLen) * ty.rimR;
-            const ox = mx - crx, oy = my - cry, oz = mz;
+            const ox = mx - (mx / rLen) * ty.rimR, oy = my - (my / rLen) * ty.rimR, oz = mz;
             if (nx*ox + ny*oy + nz*oz < 0) { nx = -nx; ny = -ny; nz = -nz; }
-            // Signed tetrahedron volume contribution relative to hub center
             curVol += (mx*nx + my*ny + mz*nz) * (1.0 / 3.0);
-
-            const qIdx = [i00 - base, i10 - base, i11 - base, i01 - base];
-            for (let q = 0; q < 4; q++) {
-              const q3 = qIdx[q] * 3;
-              pForce[q3]   += nx * 0.25;
-              pForce[q3+1] += ny * 0.25;
-              pForce[q3+2] += nz * 0.25;
-            }
           }
         }
-        const safeVol = Math.max(ty.restVol * 0.28, curVol);
-        const boyle = Math.max(0.75, Math.min(2.3, ty.restVol / safeVol));
-        // Pneumatic pressure proportional to PSI slider * Boyle compression boost!
-        const pressGain = (cfg.tyrePsi * 2.35) * boyle;
+        const safeVol = Math.max(ty.restVol * 0.35, curVol);
+        const boyle = Math.max(0.85, Math.min(1.9, ty.restVol / safeVol));
 
-        // Couple axle vertical load with pneumatic ground reaction!
-        const restHubY = this.groundY + ty.outerR;
-        // Also measure bump height if collider sphere is underneath the tire footprint!
+        // Couple axle vertical load with pneumatic ground & curb bump reaction!
         let supportTopY = this.groundY;
         if (colOn) {
           const dxC = ty.hubX - cx, dzC = ty.hubZ - cz;
           const horiz = Math.hypot(dxC, dzC);
           if (horiz < cr + ty.outerR * 0.72) {
-            const bumpH = cy + Math.sqrt(Math.max(0, (cr + 0.05)*(cr + 0.05) - dxC*dxC * 0.45));
+            const bumpH = cy + Math.sqrt(Math.max(0, (cr + 0.04)*(cr + 0.04) - dxC*dxC * 0.45));
             if (bumpH > supportTopY) supportTopY = bumpH;
           }
         }
         const deflection = Math.max(0.0, (supportTopY + ty.outerR) - ty.hubY);
-        // Real pneumatic spring rate scales linearly with PSI + progressive Boyle compression!
         const kPneumatic = 18.0 + cfg.tyrePsi * 2.95 * boyle;
-        const cPneumatic = 9.5 + cfg.tyrePsi * 0.18;
+        const cPneumatic = 10.5 + cfg.tyrePsi * 0.20;
         const springUp = deflection > 0.0 ? (deflection * kPneumatic - ty.hubVy * cPneumatic) : (-ty.hubVy * 0.6);
         const axleDown = -cfg.tyreLoad * 18.5;
-
-        for (let si = 0; si < S; si++) {
-          for (let pi = 1; pi < P - 1; pi++) {
-            const pid = base + si * P + pi;
-            const p3 = pid * 3;
-            const l3 = (pid - base) * 3;
-            vel[p3]   += pForce[l3]   * pressGain * h;
-            vel[p3+1] += pForce[l3+1] * pressGain * h;
-            vel[p3+2] += pForce[l3+2] * pressGain * h;
-
-            // Rotational drive torque from rim through sidewall to tread
-            const rx = pos[p3] - hx, ry = pos[p3+1] - hy;
-            const targetVx = -ry * spin, targetVy = rx * spin;
-            const rotCouple = (pi === 1 || pi === P - 2) ? 0.35 : 0.09;
-            vel[p3]   += (targetVx - vel[p3])   * rotCouple;
-            vel[p3+1] += (targetVy - vel[p3+1]) * rotCouple;
-          }
-        }
         const axleForce = axleDown + Math.max(0.0, springUp) - (deflection <= 0 ? ty.hubVy * 0.4 : 0);
         ty.hubVy += axleForce * h;
         ty.hubY  += ty.hubVy * h;
@@ -689,20 +651,49 @@ class XpbdWorld {
           if (ty.hubVy < 0) ty.hubVy = -ty.hubVy * 0.18;
         }
 
-        // Rigidly place inner & outer bead particles (p = 0, p = P-1) on the rotating alloy rim!
+        // Co-rotating pneumatic carcass equilibrium (zero diagonal twist, zero checkerboard buckling!)
+        // Sidewalls smoothly bulge outward in ±Z near the compressed bottom contact patch!
+        const psiScale = Math.max(0.22, Math.min(1.75, cfg.tyrePsi / 32.0));
+        const kCarcass = (160.0 + cfg.tyrePsi * 14.5) * boyle;
+        const bulgeAmp = Math.min(0.16, deflection * 0.52 + Math.max(0, boyle - 1.0) * 0.14);
+        const profilePts = ty.profilePts;
+
         for (let si = 0; si < S; si++) {
           const a = (si / S) * Math.PI * 2 + ty.spinAngle;
           const ca = Math.cos(a), sa = Math.sin(a);
-          const rx = ty.hubX + ca * ty.rimR;
-          const ry = ty.hubY + sa * ty.rimR;
-          for (const pi of [0, P - 1]) {
+          // Contact-patch localized sidewall bulge peaks smoothly at bottom (sa = -1)
+          const bottomMask = Math.pow(Math.max(0.0, -sa), 1.6);
+          for (let pi = 0; pi < P; pi++) {
             const pid = base + si * P + pi;
             const p3 = pid * 3;
-            const bz = (pi === 0) ? -ty.beadZ : ty.beadZ;
-            pos[p3]   = rx;
-            pos[p3+1] = ry;
-            pos[p3+2] = ty.hubZ + bz;
-            prev[p3]  = pos[p3]; prev[p3+1] = pos[p3+1]; prev[p3+2] = pos[p3+2];
+            const [r0, z0] = profilePts[pi];
+            if (pi === 0 || pi === P - 1) {
+              // Rigidly locked rim beads
+              pos[p3]   = ty.hubX + ca * ty.rimR;
+              pos[p3+1] = ty.hubY + sa * ty.rimR;
+              pos[p3+2] = ty.hubZ + z0;
+              prev[p3]  = pos[p3]; prev[p3+1] = pos[p3+1]; prev[p3+2] = pos[p3+2];
+              continue;
+            }
+            // Smooth sidewall profile bulge + slight pressure expansion
+            const sideMask = (pi === 1 || pi === 2 || pi === 6 || pi === 7) ? 1.0 : 0.25;
+            const zSign = (z0 < 0) ? -1.0 : (z0 > 0 ? 1.0 : 0.0);
+            const rInf = r0 + (r0 - ty.rimR) * (psiScale - 1.0) * 0.045;
+            const zInf = z0 + zSign * bulgeAmp * sideMask * (0.28 + 0.72 * bottomMask);
+            const tx = ty.hubX + ca * rInf;
+            const tyT = ty.hubY + sa * rInf;
+            const tz = ty.hubZ + zInf;
+
+            // Co-rotating target velocity (hub linear + rim spin) so rubber rotates cleanly with rim!
+            const targetVx = -sa * rInf * spin;
+            const targetVy =  ca * rInf * spin + ty.hubVy;
+            // Viscoelastic pneumatic restoring acceleration toward inflated carcass shape
+            const ax = (tx - pos[p3])   * kCarcass + (targetVx - vel[p3])   * 18.0;
+            const ay = (tyT - pos[p3+1]) * kCarcass + (targetVy - vel[p3+1]) * 18.0;
+            const az = (tz - pos[p3+2]) * kCarcass - vel[p3+2] * 18.0;
+            vel[p3]   += ax * h;
+            vel[p3+1] += ay * h;
+            vel[p3+2] += az * h;
           }
         }
       }
@@ -1263,105 +1254,132 @@ class DynamicMeshBuilder {
     for (let si = 0; si < S; si++) {
       const sNext = (si + 1) % S;
       for (let pi = 0; pi < P - 1; pi++) {
-        const isTread = (pi >= 2 && pi <= 5);
-        const isStripe = ((pi === 1 || pi === 6) && (si % 2 === 0));
-        const col = isTread
-          ? [0.095, 0.10, 0.11]
-          : (isStripe ? [0.18, 0.19, 0.21] : [0.125, 0.132, 0.145]);
-        const rough = isTread ? 0.78 : 0.56;
+        const isTread = (pi >= 3 && pi <= 4);
+        const isShoulder = (pi === 2 || pi === 5);
+        const isSideStripe = (pi === 1 || pi === 6);
+        // Clean vulcanized dark rubber with subtle satin sidewall rib ring
+        let col = [0.115, 0.122, 0.135];
+        let rough = 0.52;
+        if (isTread)      { col = [0.068, 0.072, 0.080]; rough = 0.82; }
+        else if (isShoulder) { col = [0.085, 0.090, 0.100]; rough = 0.72; }
+        else if (isSideStripe) { col = [0.135, 0.142, 0.158]; rough = 0.46; }
         const ids = [si*P + pi, sNext*P + pi, sNext*P + (pi + 1), si*P + (pi + 1)];
         const emit = (k) => {
           const p3 = (base + k)*3, n3 = k*3;
-          this.pushVert(pos[p3],pos[p3+1],pos[p3+2], norms[n3],norms[n3+1],norms[n3+2], col[0],col[1],col[2], rough, 0.0, 0.04);
+          this.pushVert(pos[p3],pos[p3+1],pos[p3+2], norms[n3],norms[n3+1],norms[n3+2], col[0],col[1],col[2], rough, 0.0, 0.03);
         };
         emit(ids[0]); emit(ids[1]); emit(ids[2]);
         emit(ids[0]); emit(ids[2]); emit(ids[3]);
       }
     }
 
-    // 3. Emit 84 raised 3D sculpted tread blocks skinned directly to live deformed XPBD tread quads!
-    const lugH = 0.044;
+    // 3. Emit sleek, flush automotive performance tread ribs & staggered shoulder blocks (48 sectors, zero spiky origami!)
+    const lugH = 0.020;
     for (let si = 0; si < S; si++) {
       const sNext = (si + 1) % S;
       for (let pi = 2; pi <= 5; pi++) {
-        // Stagger shoulder blocks vs center ribs for authentic performance tread pattern!
-        if ((pi === 2 || pi === 5) && ((si & 1) === 1)) continue;
+        const isCenter = (pi === 3 || pi === 4);
         const i00 = si*P + pi, i10 = sNext*P + pi, i11 = sNext*P + (pi + 1), i01 = si*P + (pi + 1);
         const quad = [i00, i10, i11, i01];
-        const bPts = [], tPts = [];
-        // Inset slightly so clean tread grooves appear between every lug!
+        // Longitudinal groove inset across profile (z) & tight lateral sipes around circumference (s)
+        const uInset = isCenter ? 0.88 : 0.74;
+        const vInset = isCenter ? 0.76 : 0.72;
         const cx = 0.25*(pos[(base+i00)*3]+pos[(base+i10)*3]+pos[(base+i11)*3]+pos[(base+i01)*3]);
         const cy = 0.25*(pos[(base+i00)*3+1]+pos[(base+i10)*3+1]+pos[(base+i11)*3+1]+pos[(base+i01)*3+1]);
         const cz = 0.25*(pos[(base+i00)*3+2]+pos[(base+i10)*3+2]+pos[(base+i11)*3+2]+pos[(base+i01)*3+2]);
-        const inset = (pi === 3 || pi === 4) ? 0.78 : 0.82;
+        const bPts = [], tPts = [], qNorms = [];
         for (let q = 0; q < 4; q++) {
           const k = quad[q], p3 = (base + k)*3, n3 = k*3;
-          const bx = cx + (pos[p3] - cx) * inset;
-          const by = cy + (pos[p3+1] - cy) * inset;
-          const bz = cz + (pos[p3+2] - cz) * inset;
+          const bx = cx + (pos[p3]   - cx) * uInset;
+          const by = cy + (pos[p3+1] - cy) * uInset;
+          const bz = cz + (pos[p3+2] - cz) * vInset;
+          const hLocal = isCenter ? lugH : lugH * 0.85;
           bPts.push([bx, by, bz]);
-          tPts.push([bx + norms[n3]*lugH, by + norms[n3+1]*lugH, bz + norms[n3+2]*lugH]);
+          tPts.push([bx + norms[n3]*hLocal, by + norms[n3+1]*hLocal, bz + norms[n3+2]*hLocal]);
+          qNorms.push([norms[n3], norms[n3+1], norms[n3+2]]);
         }
-        const tc = (pi === 3 || pi === 4) ? [0.11, 0.115, 0.125] : [0.09, 0.095, 0.105];
-        // Top cap + 4 sides of each raised 3D tread block
-        this.pushTriFlat(...tPts[0], ...tPts[1], ...tPts[2], tc[0],tc[1],tc[2], 0.72, 0.0, 0.05);
-        this.pushTriFlat(...tPts[0], ...tPts[2], ...tPts[3], tc[0],tc[1],tc[2], 0.72, 0.0, 0.05);
+        const tc = isCenter ? [0.105, 0.110, 0.122] : [0.095, 0.100, 0.112];
+        // Smooth-shaded top face of tread block (follows curved tire normal cleanly!)
+        this.ensure(6);
+        const emitTop = (q) => this.pushVert(tPts[q][0],tPts[q][1],tPts[q][2], qNorms[q][0],qNorms[q][1],qNorms[q][2], tc[0],tc[1],tc[2], 0.76, 0.0, 0.04);
+        emitTop(0); emitTop(1); emitTop(2);
+        emitTop(0); emitTop(2); emitTop(3);
+        // Dark tread groove sidewalls
         for (let e = 0; e < 4; e++) {
           const e2 = (e + 1) % 4;
-          this.pushTriFlat(...bPts[e], ...bPts[e2], ...tPts[e2], 0.075,0.08,0.088, 0.82, 0.0, 0.03);
-          this.pushTriFlat(...bPts[e], ...tPts[e2], ...tPts[e],  0.075,0.08,0.088, 0.82, 0.0, 0.03);
+          this.pushTriFlat(...bPts[e], ...bPts[e2], ...tPts[e2], 0.048,0.052,0.058, 0.88, 0.0, 0.02);
+          this.pushTriFlat(...bPts[e], ...tPts[e2], ...tPts[e],  0.048,0.052,0.058, 0.88, 0.0, 0.02);
         }
       }
     }
 
-    // 4. Forged Alloy 5-Spoke Wheel Rim + Brushed Barrel + Brake Rotor + Red Caliper!
-    const rimSegs = 28;
-    const rimR = ty.rimR, lipR = rimR + 0.045, bz = ty.beadZ + 0.025;
-    // Rim outer cylinder barrel + metallic lip rings
-    this.ensure(rimSegs * 18);
+    // 4. Smooth-Shaded Forged Alloy 5-Spoke Wheel Rim + Brushed Barrel + Recessed Rotor & Tucked Red Caliper!
+    const rimSegs = 48;
+    const rimR = ty.rimR, innerR = rimR - 0.068, lipR = rimR + 0.032, bz = ty.beadZ + 0.015;
+    this.ensure(rimSegs * 30);
     for (let i = 0; i < rimSegs; i++) {
       const a0 = (i / rimSegs) * Math.PI * 2 + ty.spinAngle;
       const a1 = ((i + 1) / rimSegs) * Math.PI * 2 + ty.spinAngle;
       const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
-      // Inner dark alloy barrel
-      const p00 = [hx+c0*rimR, hy+s0*rimR, hz-bz], p10 = [hx+c1*rimR, hy+s1*rimR, hz-bz];
-      const p11 = [hx+c1*rimR, hy+s1*rimR, hz+bz], p01 = [hx+c0*rimR, hy+s0*rimR, hz+bz];
-      this.pushTriFlat(...p00, ...p10, ...p11, 0.45,0.48,0.54, 0.22, 0.0, 0.88);
-      this.pushTriFlat(...p00, ...p11, ...p01, 0.45,0.48,0.54, 0.22, 0.0, 0.88);
-      // Outer machined rim flanges (front & back)
+
+      // Smooth-normal inner metallic barrel (normals point inward toward hub!)
+      const b00 = [hx+c0*innerR, hy+s0*innerR, hz-bz], b10 = [hx+c1*innerR, hy+s1*innerR, hz-bz];
+      const b11 = [hx+c1*innerR, hy+s1*innerR, hz+bz], b01 = [hx+c0*innerR, hy+s0*innerR, hz+bz];
+      const pushBarrel = (p, nx, ny) => this.pushVert(p[0],p[1],p[2], nx,ny,0, 0.34,0.37,0.42, 0.24, 0.0, 0.88);
+      pushBarrel(b00,-c0,-s0); pushBarrel(b10,-c1,-s1); pushBarrel(b11,-c1,-s1);
+      pushBarrel(b00,-c0,-s0); pushBarrel(b11,-c1,-s1); pushBarrel(b01,-c0,-s0);
+
+      // Smooth-normal outer machined rim lip rings (front & back)
       for (const sgn of [-1, 1]) {
         const zf = hz + sgn * bz;
-        const q0 = [hx+c0*(rimR-0.06), hy+s0*(rimR-0.06), zf];
-        const q1 = [hx+c1*(rimR-0.06), hy+s1*(rimR-0.06), zf];
-        const q2 = [hx+c1*lipR,        hy+s1*lipR,        zf];
-        const q3 = [hx+c0*lipR,        hy+s0*lipR,        zf];
-        this.pushTriFlat(...q0, ...q1, ...q2, 0.78,0.82,0.88, 0.16, 0.0, 0.94);
-        this.pushTriFlat(...q0, ...q2, ...q3, 0.78,0.82,0.88, 0.16, 0.0, 0.94);
+        const zIn = hz + sgn * (bz - 0.035);
+        const q0 = [hx+c0*innerR, hy+s0*innerR, zIn];
+        const q1 = [hx+c1*innerR, hy+s1*innerR, zIn];
+        const q2 = [hx+c1*lipR,   hy+s1*lipR,   zf];
+        const q3 = [hx+c0*lipR,   hy+s0*lipR,   zf];
+        const pushLip = (p, c, s) => this.pushVert(p[0],p[1],p[2], c*0.35, s*0.35, sgn*0.93, 0.78,0.82,0.89, 0.14, 0.0, 0.95);
+        pushLip(q0,c0,s0); pushLip(q1,c1,s1); pushLip(q2,c1,s1);
+        pushLip(q0,c0,s0); pushLip(q2,c1,s1); pushLip(q3,c0,s0);
       }
     }
-    // 5 Forged Y-Spokes + Lug Nuts
+
+    // 5 Sculpted 3D Boxed Twin-Spokes + Recessed Lug Nuts
     for (let sp = 0; sp < 5; sp++) {
       const a = (sp / 5) * Math.PI * 2 + ty.spinAngle;
       const ca = Math.cos(a), sa = Math.sin(a);
       const px = -sa, py = ca;
       for (const sgn of [-1, 1]) {
-        const zHub = hz + sgn * (bz * 0.62), zRim = hz + sgn * (bz * 0.84);
-        const w0 = 0.065, w1 = 0.048;
-        const r0 = 0.14, r1 = rimR - 0.04;
-        const v0 = [hx+ca*r0-px*w0, hy+sa*r0-py*w0, zHub];
-        const v1 = [hx+ca*r0+px*w0, hy+sa*r0+py*w0, zHub];
-        const v2 = [hx+ca*r1+px*w1, hy+sa*r1+py*w1, zRim];
-        const v3 = [hx+ca*r1-px*w1, hy+sa*r1-py*w1, zRim];
-        this.pushTriFlat(...v0, ...v1, ...v2, 0.72,0.76,0.83, 0.18, 0.0, 0.92);
-        this.pushTriFlat(...v0, ...v2, ...v3, 0.72,0.76,0.83, 0.18, 0.0, 0.92);
+        const zFront = hz + sgn * (bz * 0.76);
+        const zBack  = hz + sgn * (bz * 0.50);
+        const zHubF  = hz + sgn * (bz * 0.56);
+        const zHubB  = hz + sgn * (bz * 0.34);
+        const w0 = 0.058, w1 = 0.044;
+        const r0 = 0.16, r1 = innerR + 0.015;
+        const f0 = [hx+ca*r0-px*w0, hy+sa*r0-py*w0, zHubF];
+        const f1 = [hx+ca*r0+px*w0, hy+sa*r0+py*w0, zHubF];
+        const f2 = [hx+ca*r1+px*w1, hy+sa*r1+py*w1, zFront];
+        const f3 = [hx+ca*r1-px*w1, hy+sa*r1-py*w1, zFront];
+        const k0 = [hx+ca*r0-px*w0, hy+sa*r0-py*w0, zHubB];
+        const k1 = [hx+ca*r0+px*w0, hy+sa*r0+py*w0, zHubB];
+        const k2 = [hx+ca*r1+px*w1, hy+sa*r1+py*w1, zBack];
+        const k3 = [hx+ca*r1-px*w1, hy+sa*r1-py*w1, zBack];
+        // Front face + two side bevels for real 3D solid spoke depth!
+        this.pushTriFlat(...f0, ...f1, ...f2, 0.74,0.78,0.85, 0.16, 0.0, 0.94);
+        this.pushTriFlat(...f0, ...f2, ...f3, 0.74,0.78,0.85, 0.16, 0.0, 0.94);
+        this.pushTriFlat(...f1, ...k1, ...k2, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...f1, ...k2, ...f2, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...k0, ...f0, ...f3, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...k0, ...f3, ...k3, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
       }
-      // Chrome lug bolt
-      this.addSphere(hx + ca*0.145, hy + sa*0.145, hz + bz*0.72, 0.028, 0.028, 0.03, [0.88, 0.90, 0.94], [0.12, 0.0, 0.96], 4, 6);
+      // Chrome lug bolt (both faces)
+      this.addSphere(hx + ca*0.135, hy + sa*0.135, hz + bz*0.58, 0.026, 0.026, 0.026, [0.90, 0.92, 0.96], [0.10, 0.0, 0.96], 5, 8);
+      this.addSphere(hx + ca*0.135, hy + sa*0.135, hz - bz*0.58, 0.026, 0.026, 0.026, [0.90, 0.92, 0.96], [0.10, 0.0, 0.96], 5, 8);
     }
-    // Center wheel hub cap + drilled steel brake rotor disc + stationary red performance brake caliper!
-    this.addSphere(hx, hy, hz, 0.21, 0.21, bz * 0.78, [0.18, 0.20, 0.24], [0.24, 0.0, 0.85], 8, 14);
-    this.addSphere(hx, hy, hz, 0.44, 0.44, 0.045, [0.56, 0.58, 0.62], [0.28, 0.0, 0.86], 6, 16);
-    this.addSphere(hx + 0.36, hy + 0.14, hz + 0.05, 0.14, 0.21, 0.13, [0.86, 0.12, 0.12], [0.24, 0.05, 0.45], 6, 10);
+
+    // Center alloy hub cap + brushed steel brake rotor + compact crimson caliper tucked cleanly BEHIND the spokes!
+    this.addSphere(hx, hy, hz, 0.20, 0.20, bz * 0.62, [0.22, 0.24, 0.28], [0.20, 0.0, 0.88], 10, 18);
+    this.addSphere(hx, hy, hz, 0.48, 0.48, 0.032, [0.58, 0.60, 0.64], [0.22, 0.0, 0.90], 8, 24);
+    this.addSphere(hx + 0.38, hy + 0.14, hz, 0.12, 0.22, 0.075, [0.82, 0.11, 0.11], [0.22, 0.02, 0.35], 8, 12);
   }
 
   buildFromWorld(world, timeSec, showCollider) {
@@ -1559,18 +1577,18 @@ function addReedCluster(world, ox, oy, oz, reedCount = 18) {
   }
 }
 
-function addPneumaticTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.14, halfW = 0.42, sectors = 28) {
-  // Cross-section profile from inner bead (0) -> sidewall (1,2) -> shoulder (3) -> crown (4) -> shoulder (5) -> sidewall (6,7) -> outer bead (8)
+function addPneumaticTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.14, halfW = 0.42, sectors = 48) {
+  // Smooth automotive low-profile radial cross-section (inner bead -> sidewall -> shoulder -> wide crown -> outer bead)
   const profilePts = [
-    [rimR,                 -halfW * 0.72], // 0: inner rim bead (rigidly locked to rotating rim)
-    [rimR + (outerR-rimR)*0.34, -halfW * 1.00], // 1: lower inner sidewall
-    [rimR + (outerR-rimR)*0.74, -halfW * 1.04], // 2: upper inner sidewall
-    [outerR - 0.025,       -halfW * 0.74], // 3: inner tread shoulder
-    [outerR,                0.0         ], // 4: center tread crown
-    [outerR - 0.025,        halfW * 0.74], // 5: outer tread shoulder
-    [rimR + (outerR-rimR)*0.74,  halfW * 1.04], // 6: upper outer sidewall
-    [rimR + (outerR-rimR)*0.34,  halfW * 1.00], // 7: lower outer sidewall
-    [rimR,                  halfW * 0.72], // 8: outer rim bead (rigidly locked to rotating rim)
+    [rimR,                      -halfW * 0.76], // 0: inner rim bead
+    [rimR + (outerR-rimR)*0.36, -halfW * 0.98], // 1: lower inner sidewall
+    [rimR + (outerR-rimR)*0.78, -halfW * 1.00], // 2: upper inner sidewall
+    [outerR - 0.014,            -halfW * 0.74], // 3: inner tread shoulder
+    [outerR,                     0.0         ], // 4: center tread crown
+    [outerR - 0.014,             halfW * 0.74], // 5: outer tread shoulder
+    [rimR + (outerR-rimR)*0.78,  halfW * 1.00], // 6: upper outer sidewall
+    [rimR + (outerR-rimR)*0.36,  halfW * 0.98], // 7: lower outer sidewall
+    [rimR,                       halfW * 0.76], // 8: outer rim bead
   ];
   const P = profilePts.length;
   const startIdx = world.n;
@@ -1582,9 +1600,8 @@ function addPneumaticTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.14, halfW =
       const [r, zOff] = profilePts[pi];
       const isBead = (pi === 0 || pi === P - 1);
       const isTread = (pi >= 3 && pi <= 5);
-      // Heavier rubber mass in the tread belt than in the sidewalls
-      const invM = isBead ? 0.0 : (isTread ? 0.82 : 1.05);
-      world.addParticle(hx + ca * r, hy + sa * r, hz + zOff, invM, 0.048, 0.12);
+      const invM = isBead ? 0.0 : (isTread ? 0.85 : 1.0);
+      world.addParticle(hx + ca * r, hy + sa * r, hz + zOff, invM, 0.025, 0.04);
     }
   }
 
@@ -1595,26 +1612,21 @@ function addPneumaticTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.14, halfW =
     for (let pi = 0; pi < P; pi++) {
       const cur = startIdx + si * P + pi;
       const nextS = startIdx + sNext * P + pi;
-      // 1. Circumferential belts (steel tread belts at pi=3..5 are extra stiff!)
       if (pi > 0 && pi < P - 1) {
-        const kCirc = (pi >= 3 && pi <= 5) ? 2800 : 1750;
+        const kCirc = (pi >= 3 && pi <= 5) ? 2600 : 1650;
         world.addDist(cur, nextS, kCirc, 0.0, true);
-        // Circumferential flexural bending (gives rubber thickness & prevents sharp kinks!)
-        world.addBend(cur, startIdx + sNext2 * P + pi, (pi >= 3 && pi <= 5) ? 58.0 : 34.0);
+        world.addBend(cur, startIdx + sNext2 * P + pi, (pi >= 3 && pi <= 5) ? 62.0 : 38.0);
       }
-      // 2. Radial ply cords (bead -> sidewall -> shoulder -> crown -> bead)
       if (pi < P - 1) {
         const nextP = startIdx + si * P + (pi + 1);
-        world.addDist(cur, nextP, 2350, 0.0, true);
-        // Diagonal cross-ply shear belts (lateral cornering stiffness!)
+        world.addDist(cur, nextP, 2200, 0.0, true);
         const diagA = startIdx + sNext * P + (pi + 1);
         const diagB = startIdx + sNext * P + pi;
-        world.addDist(cur, diagA, 1150, 0.0, false);
-        world.addDist(nextP, diagB, 1150, 0.0, false);
+        world.addDist(cur, diagA, 950, 0.0, false);
+        world.addDist(nextP, diagB, 950, 0.0, false);
       }
-      // 3. Profile flexural bending (sidewall stiffness!)
       if (pi < P - 2) {
-        world.addBend(cur, startIdx + si * P + (pi + 2), 46.0);
+        world.addBend(cur, startIdx + si * P + (pi + 2), 48.0);
       }
     }
   }
@@ -1639,9 +1651,9 @@ function addPneumaticTyre(world, hx, hy, hz, rimR = 0.66, outerR = 1.14, halfW =
   }
 
   world.tyres.push({
-    startIdx, sectors, profile: P,
+    startIdx, sectors, profile: P, profilePts,
     hubX: hx, hubY: hy, hubZ: hz, hubVy: 0.0, spinAngle: 0.0,
-    rimR, outerR, beadZ: halfW * 0.72,
+    rimR, outerR, beadZ: halfW * 0.76,
     restVol: Math.max(0.25, Math.abs(restVol)),
     pForce: new Float32Array(sectors * P * 3)
   });
@@ -1659,7 +1671,7 @@ const SCENES = [
       w.groundY = -1.78;
       w.collider.pos = [1.55, -1.62, 0.0];
       w.collider.radius = 0.42;
-      addPneumaticTyre(w, 0.0, -0.52, 0.0, 0.66, 1.14, 0.42, 28);
+      addPneumaticTyre(w, 0.0, -0.62, 0.0, 0.66, 1.14, 0.42, 48);
     }
   },
   {
