@@ -902,6 +902,12 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/GeometrySpace/Fracture/FastRuntimeFracture.cpp
     Engine/GeometrySpace/Fracture/EngineeringBakedFracture.cpp
     Engine/GeometrySpace/Fracture/ConvexPartitioning.cpp
+    Engine/GeometrySpace/Deformation/TireSurfaceBuilder.cpp
+    Engine/GeometrySpace/Deformation/TetrahedralCageEmbedder.cpp
+    Engine/GeometrySpace/Deformation/SurfaceQuadCageEmbedder.cpp
+    Engine/GeometrySpace/Deformation/VertexMotionAtlasBaker.cpp
+    Engine/GeometrySpace/Deformation/VertexMotionAtlasPlayer.cpp
+    Engine/GeometrySpace/Deformation/VertexMotionAtlasExporter.cpp
     Engine/GeometrySpace/Parametric/Arrangement/ArrangementAnalysis.cpp
     Engine/GeometrySpace/Parametric/Arrangement/JointSolver.cpp
     Engine/GeometrySpace/Parametric/Audit/EnclosedVolume.cpp
@@ -1082,6 +1088,8 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/Codecs/Simulation/ForceFieldCodec.cpp
     Engine/Codecs/Simulation/FluidGridCodec.cpp
     Engine/Codecs/Simulation/ParticleSpaceCodec.cpp
+    Engine/Codecs/Simulation/SoftBodyCodec.cpp
+    Engine/Codecs/Simulation/VertexAtlasCodec.cpp
     Engine/Codecs/RenderSpaceCodec.cpp
     Engine/Codecs/WorldSpaceCodec.cpp
     Engine/Codecs/ControlVehicleSurfaceDecoder.cpp
@@ -1111,6 +1119,13 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/Fluid/FluidVolumeRenderer.cpp
     Engine/SimulationSpace/Fluid/FluidSimulationPostOverlay.cpp
     Engine/SimulationSpace/Fluid/FluidPresetRegistry.cpp
+    Engine/SimulationSpace/Deformable/TetrahedralSolidBuilder.cpp
+    Engine/SimulationSpace/Deformable/ConflictColorPartitioner.cpp
+    Engine/SimulationSpace/Deformable/NeoHookeanTetSolver.cpp
+    Engine/SimulationSpace/Deformable/PneumaticTireSolver.cpp
+    Engine/SimulationSpace/Deformable/DeformablePhysicsCoupling.cpp
+    Engine/SimulationSpace/Deformable/XpbdConstraintSolver.cpp
+    Engine/SimulationSpace/Deformable/DeformablePresetRegistry.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1414,6 +1429,8 @@ if(BUILD_TESTING)
     frontier_register_exhibit(ParticleGpuPhysicsValidation              Exhibits/ParticleGpuPhysicsValidation.cpp)
     frontier_register_exhibit(FluidSolverValidation                     Exhibits/FluidSolverValidation.cpp)
     frontier_register_exhibit(SimulationCodecValidation                 Exhibits/SimulationCodecValidation.cpp)
+    frontier_register_exhibit(DeformableSolverValidation                Exhibits/DeformableSolverValidation.cpp)
+    frontier_register_exhibit(VertexMotionAtlasValidation               Exhibits/VertexMotionAtlasValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)
