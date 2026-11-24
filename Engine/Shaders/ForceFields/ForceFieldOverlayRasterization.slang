@@ -39,6 +39,12 @@ struct ForceOverlayVarying
     float  PointSize    : SV_PointSize;
 };
 
+struct ForceOverlayFragmentInput
+{
+    float4 ClipPosition : SV_Position;
+    float4 Colour       : COLOR0;
+};
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  SCIENTIFIC COLOUR RAMPS
 //------------------------------------------------------------------------------------------------------------------------
@@ -205,7 +211,7 @@ ForceOverlayVarying ForceVectorVertexEntry(uint vertexId : SV_VulkanVertexID)
 //------------------------------------------------------------------------------------------------------------------------
 
 [shader("fragment")]
-float4 ForceOverlayFragmentEntry(ForceOverlayVarying input) : SV_Target0
+float4 ForceOverlayFragmentEntry(ForceOverlayFragmentInput input) : SV_Target0
 {
     if (input.Colour.a <= 0.0)
     {

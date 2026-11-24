@@ -299,7 +299,7 @@ void ComputeEntry(uint3 dispatchThreadId : SV_DispatchThreadID)
             float3 cohesionDir = distLeader > 1.0e-4 ? (toLeader / distLeader) : float3(0.0, 1.0, 0.0);
             float3 tangent = normalize(cross(float3(0.0, 1.0, 0.0), position - origin + float3(1.0e-4, 0.0, 1.0e-4)));
             float3 flutter = CurlNoise(position * 1.25 + float3(simTime * 0.8, seed * 5.3, -simTime * 0.6));
-            float wingRate = uParams.DerezEdgeColourWing.w;
+            float wingRate = uParams.Shape.DerezEdgeColourWing.w;
             float wingBob = sin(simTime * max(wingRate, 1.0) + seed * 6.2831853) * 0.35;
             acceleration += (cohesionDir * uParams.DissolveSwarm.w * min(distLeader, 3.0)
                           + tangent * uParams.SwarmControlFlags.x

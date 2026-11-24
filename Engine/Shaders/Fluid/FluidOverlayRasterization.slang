@@ -107,6 +107,12 @@ struct ColouredVertexOutput
     float  PointSize : SV_PointSize;
 };
 
+struct ColouredFragmentInput
+{
+    float4 Position  : SV_Position;
+    float4 Colour    : COLOR0;
+};
+
 struct SliceVertexOutput
 {
     float4 Position : SV_Position;
@@ -317,7 +323,7 @@ ColouredVertexOutput GizmoLineVertexEntry(GizmoVertexInput input)
 }
 
 [shader("fragment")]
-float4 OverlayColourFragmentEntry(ColouredVertexOutput input) : SV_Target0
+float4 OverlayColourFragmentEntry(ColouredFragmentInput input) : SV_Target0
 {
     if (input.Colour.a <= 0.0) discard;
     return input.Colour;

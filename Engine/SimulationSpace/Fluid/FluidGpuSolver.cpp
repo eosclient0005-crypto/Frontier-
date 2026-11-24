@@ -1565,12 +1565,12 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
     const uint32_t gz = (GridCells_[2] + 3u) / 4u;
 
     FluidVolumeUniformBlock vol {};
-    vol.GridDimMode        = { static_cast<float>(GridCells_[0]), static_cast<float>(GridCells_[1]), static_cast<float>(GridCells_[2]), 0.0f };
+    vol.GridBoundary       = { static_cast<int32_t>(GridCells_[0]), static_cast<int32_t>(GridCells_[1]), static_cast<int32_t>(GridCells_[2]), static_cast<int32_t>(settings.Boundary) };
     vol.GridCentreCellSize = { CentreMeters_[0], CentreMeters_[1], CentreMeters_[2], CellSizeMeters_ };
-    vol.BoundaryAndCount   = { static_cast<float>(settings.Boundary), static_cast<float>(std::min<size_t>(colliders.size(), 4u)), 0.0f, 0.0f };
+    vol.LookupOriginCount[3] = static_cast<int32_t>(std::min<size_t>(colliders.size(), 4u));
     for (size_t i = 0u; i < std::min<size_t>(colliders.size(), 4u); ++i)
     {
-        vol.ColliderSpheres[i] = { colliders[i].CentreMeters[0], colliders[i].CentreMeters[1], colliders[i].CentreMeters[2], colliders[i].RadiusMeters };
+        vol.Colliders[i] = { colliders[i].CentreMeters[0], colliders[i].CentreMeters[1], colliders[i].CentreMeters[2], colliders[i].RadiusMeters };
     }
 
     if (!forceRecords.empty() && BufForceRecords_.HostAddress != nullptr)
