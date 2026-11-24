@@ -36,7 +36,7 @@ inline constexpr int32_t  kLookupExtentZ         = 64;        // [-] - Sparse ti
 inline constexpr size_t   kLookupTexelCount      = 64u * 16u * 64u; // 65536 texels (64 x 1024)
 inline constexpr int32_t  kSparseOutsideCell     = -1000000;  // [-] - Sentinel cell for inactive atlas pixels
 inline constexpr uint32_t kMaximumFluidColliders = 4u;        // [-] - Analytic sphere collider slots in ColliderChunk
-inline constexpr uint32_t kMaximumReleaseSources = 12u;       // [-] - ReleaseSource slots in InjectFragment
+inline constexpr uint32_t kMaximumReleaseSources = 6u;        // [-] - ReleaseSource slots in InjectFragment (MAX_EMITTERS = 6)
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     ENUMERATIONS

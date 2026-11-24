@@ -665,6 +665,11 @@ function(frontier_compile_fluid_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UN
     set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
 endfunction()
 
+frontier_compile_fluid_slang_shader(FluidAdvectCompute.slang     ComputeEntry compute FluidAdvectCompute.comp.spv)
+frontier_compile_fluid_slang_shader(FluidMacCormackCompute.slang ComputeEntry compute FluidMacCormackCompute.comp.spv)
+frontier_compile_fluid_slang_shader(FluidInjectCompute.slang     ComputeEntry compute FluidInjectCompute.comp.spv)
+frontier_compile_fluid_slang_shader(FluidForcesCompute.slang     ComputeEntry compute FluidForcesCompute.comp.spv)
+
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
     set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
@@ -1060,6 +1065,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ParticleSpace/ParticleGpuSimulation.cpp
     Engine/ParticleSpace/ParticleGpuRenderer.cpp
     Engine/SimulationSpace/Fluid/SparseTileBank.cpp
+    Engine/SimulationSpace/Fluid/FluidGpuSolver.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
