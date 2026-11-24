@@ -1,0 +1,1923 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Frontier · XPBD Particle-Driven Mesh Studio</title>
+<style>
+  :root {
+    --bg: #0c0f16;
+    --panel: rgba(16, 21, 31, 0.92);
+    --border: #263146;
+    --text: #e6edf7;
+    --muted: #8b9bb6;
+    --accent: #56b6ff;
+    --accent2: #4ade80;
+    --warn: #fbbf24;
+    --danger: #f87171;
+  }
+  * { box-sizing: border-box; user-select: none; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+  #app { display: grid; grid-template-columns: 310px 1fr; height: 100vh; width: 100vw; }
+  aside {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto; padding: 14px; gap: 12px;
+    z-index: 5;
+  }
+  .brand { display: flex; flex-direction: column; gap: 3px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+  .brand h1 { margin: 0; font-size: 15px; letter-spacing: 0.3px; display: flex; align-items: center; gap: 7px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent2); box-shadow: 0 0 10px var(--accent2); display: inline-block; }
+  .brand small { color: var(--muted); font-size: 11px; line-height: 1.35; }
+  .section { display: flex; flex-direction: column; gap: 8px; padding-bottom: 10px; border-bottom: 1px solid rgba(38,49,70,0.65); }
+  .section:last-child { border-bottom: none; }
+  .sec-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: #9ab2d4; }
+  .scene-grid { display: grid; grid-template-columns: 1fr; gap: 5px; }
+  .scene-btn {
+    text-align: left; background: #141b28; border: 1px solid var(--border); color: var(--text);
+    border-radius: 8px; padding: 8px 10px; cursor: pointer; transition: border-color .12s, background .12s;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .scene-btn:hover { border-color: #46608a; background: #192233; }
+  .scene-btn.active { border-color: var(--accent); background: rgba(86, 182, 255, 0.14); }
+  .scene-btn .stitle { font-size: 12.5px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  .scene-btn .stag { font-size: 10px; color: #9ecbff; background: #1a2a42; padding: 1px 6px; border-radius: 5px; }
+  .scene-btn .sdesc { font-size: 11px; color: var(--muted); }
+  .tool-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .btn {
+    background: #172030; border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 7px 8px; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    transition: all .12s;
+  }
+  .btn:hover { border-color: #4f6b97; background: #1d293e; }
+  .btn.active { background: var(--accent); border-color: var(--accent); color: #07111c; }
+  .btn.warn { background: rgba(251,191,36,0.14); border-color: rgba(251,191,36,0.45); color: #fde68a; }
+  .btn.warn:hover { background: rgba(251,191,36,0.24); }
+  .btn.danger { background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.4); color: #fecaca; }
+  .slider-row { display: flex; flex-direction: column; gap: 3px; }
+  .slider-hdr { display: flex; justify-content: space-between; font-size: 11.5px; color: #c7d5ea; }
+  .slider-hdr span.val { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--accent); font-size: 11px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; margin: 0; }
+  .chk-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  label.chk {
+    display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #cdd9ec;
+    background: #131a26; border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; cursor: pointer;
+  }
+  label.chk input { accent-color: var(--accent); cursor: pointer; margin: 0; }
+
+  #stage { position: relative; overflow: hidden; background: #0c0f16; }
+  canvas { width: 100%; height: 100%; display: block; }
+  #hud {
+    position: absolute; top: 14px; left: 14px; pointer-events: none;
+    background: rgba(12, 16, 24, 0.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(56, 74, 106, 0.65); border-radius: 10px;
+    padding: 9px 13px; display: flex; flex-direction: column; gap: 4px;
+    font-size: 11.5px;
+  }
+  .hud-row { display: flex; gap: 14px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .hud-k { color: var(--muted); }
+  .hud-v { color: #e8f1ff; font-weight: 600; }
+  #hint {
+    position: absolute; bottom: 14px; left: 14px; pointer-events: none;
+    background: rgba(12, 16, 24, 0.78); backdrop-filter: blur(8px);
+    border: 1px solid rgba(56, 74, 106, 0.55); border-radius: 8px;
+    padding: 7px 11px; font-size: 11.5px; color: #b8c9e4;
+  }
+  #hint b { color: #fff; }
+  #errorBox {
+    position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(10,12,18,0.92); color: #fca5a5; font-size: 14px; padding: 24px; text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div class="brand">
+      <h1><span class="dot"></span> XPBD Particle-Driven Mesh Studio</h1>
+      <small>Real-time Extended Position-Based Dynamics (Layer 220) driving 3D lit procedural tubes, chain links, leaves, fronds, kelp &amp; woven cloth.</small>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">XPBD Mesh Presets</div>
+      <div class="scene-grid" id="sceneList"></div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">Interaction Tool</div>
+      <div class="tool-row">
+        <button class="btn active" data-tool="orbit">Orbit Camera</button>
+        <button class="btn" data-tool="grab">Grab &amp; Pluck</button>
+        <button class="btn" data-tool="collider">Move Collider</button>
+        <button class="btn danger" data-tool="cut">Snip / Tear</button>
+      </div>
+      <div class="tool-row" style="margin-top:2px;">
+        <button class="btn warn" id="btnGust">Wind Gust Pulse</button>
+        <button class="btn" id="btnReset">Reset Scene</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">XPBD Solver Parameters</div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Substeps / Frame</span><span class="val" id="vSubsteps">5</span></div>
+        <input type="range" id="sSubsteps" min="1" max="10" step="1" value="5"/>
+      </div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Stretch Stiffness</span><span class="val" id="vStretch">1200</span></div>
+        <input type="range" id="sStretch" min="40" max="4000" step="20" value="1200"/>
+      </div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Bend Stiffness</span><span class="val" id="vBend">0.45</span></div>
+        <input type="range" id="sBend" min="0.0" max="1.0" step="0.02" value="0.45"/>
+      </div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Damping</span><span class="val" id="vDamping">0.992</span></div>
+        <input type="range" id="sDamping" min="0.95" max="0.999" step="0.001" value="0.992"/>
+      </div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Gravity / Buoyancy</span><span class="val" id="vGravity">-9.8</span></div>
+        <input type="range" id="sGravity" min="-15" max="12" step="0.2" value="-9.8"/>
+      </div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Tear Ratio (0 = Unbreakable)</span><span class="val" id="vTear">2.4x</span></div>
+        <input type="range" id="sTear" min="0" max="4.0" step="0.1" value="2.4"/>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">Wind &amp; Fluid Coupling</div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Wind / Current Strength</span><span class="val" id="vWind">1.8</span></div>
+        <input type="range" id="sWind" min="0" max="10" step="0.1" value="1.8"/>
+      </div>
+      <div class="slider-row">
+        <div class="slider-hdr"><span>Turbulence Eddies</span><span class="val" id="vTurb">1.1</span></div>
+        <input type="range" id="sTurb" min="0" max="5" step="0.1" value="1.1"/>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="sec-title">Mesh &amp; XPBD Debug View</div>
+      <div class="chk-row">
+        <label class="chk"><input type="checkbox" id="cMesh" checked/> 3D Driven Mesh</label>
+        <label class="chk"><input type="checkbox" id="cParticles"/> XPBD Particles</label>
+        <label class="chk"><input type="checkbox" id="cConstraints"/> Tension Links</label>
+        <label class="chk"><input type="checkbox" id="cCollider" checked/> Collider Sphere</label>
+      </div>
+    </div>
+  </aside>
+
+  <main id="stage">
+    <canvas id="glCanvas"></canvas>
+    <div id="hud">
+      <div style="font-weight:700;color:#fff;font-size:12.5px;" id="hudTitle">Botanical Strands &amp; Orb Web</div>
+      <div class="hud-row">
+        <span><span class="hud-k">FPS:</span> <span class="hud-v" id="hFps">60</span></span>
+        <span><span class="hud-k">XPBD Particles:</span> <span class="hud-v" id="hPts">0</span></span>
+        <span><span class="hud-k">Constraints:</span> <span class="hud-v" id="hCons">0</span></span>
+      </div>
+      <div class="hud-row">
+        <span><span class="hud-k">Driven Triangles:</span> <span class="hud-v" id="hTris">0</span></span>
+        <span><span class="hud-k">Torn:</span> <span class="hud-v" id="hTorn" style="color:#fbbf24;">0</span></span>
+      </div>
+    </div>
+    <div id="hint">
+      <b>Drag</b>: active tool &nbsp;|&nbsp; <b>Right-Drag / Shift+Drag</b>: Grab &amp; Pluck particles anytime &nbsp;|&nbsp; <b>Scroll</b>: Zoom &nbsp;|&nbsp; Toggle <b>XPBD Particles</b> or <b>Tension Links</b> to inspect the particle skeleton driving the 3D mesh
+    </div>
+    <div id="errorBox"></div>
+  </main>
+</div>
+
+<script>
+(() => {
+"use strict";
+
+// =================================================================================================
+// 1. WEBGL2 CONTEXT & SHADERS (3D Lit Procedural Mesh Shader + Debug Particle/Constraint Shader)
+// =================================================================================================
+const canvas = document.getElementById("glCanvas");
+const gl = canvas.getContext("webgl2", { antialias: true, alpha: false, powerPreference: "high-performance" });
+if (!gl) {
+  const eb = document.getElementById("errorBox");
+  eb.style.display = "flex";
+  eb.textContent = "WebGL2 is required for the XPBD Particle-Driven Mesh Studio.";
+  return;
+}
+
+function compileShader(type, src) {
+  const sh = gl.createShader(type);
+  gl.shaderSource(sh, src);
+  gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+    throw new Error(gl.getShaderInfoLog(sh));
+  }
+  return sh;
+}
+function linkProgram(vsSrc, fsSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fsSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    throw new Error(gl.getProgramInfoLog(p));
+  }
+  return p;
+}
+
+// 3D Lit Mesh Shader: position(3), normal(3), color(3), material(3: roughness, translucency/emissive, metallic)
+const meshProgram = linkProgram(
+`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNorm;
+layout(location=2) in vec3 aCol;
+layout(location=3) in vec3 aMat; // x=roughness, y=subsurface/emissive, z=metallic
+
+uniform mat4 uViewProj;
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec3 vColor;
+out vec3 vMat;
+
+void main() {
+  vWorldPos = aPos;
+  vNormal = aNorm;
+  vColor = aCol;
+  vMat = aMat;
+  gl_Position = uViewProj * vec4(aPos, 1.0);
+}
+`,
+`#version 300 es
+precision highp float;
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec3 vColor;
+in vec3 vMat;
+
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uSkyTop;
+uniform vec3 uSkyBot;
+uniform float uUnderwater;
+
+out vec4 fragColor;
+
+void main() {
+  vec3 N = normalize(vNormal);
+  if (!gl_FrontFacing) N = -N;
+  vec3 V = normalize(uCamPos - vWorldPos);
+  vec3 L = normalize(uSunDir);
+  vec3 H = normalize(L + V);
+
+  float rough = clamp(vMat.x, 0.06, 0.98);
+  float sssOrEmissive = vMat.y;
+  float metal = clamp(vMat.z, 0.0, 1.0);
+
+  // Hemispherical ambient + key sun + cool fill + Fresnel rim
+  float hemi = N.y * 0.5 + 0.5;
+  vec3 ambient = mix(uSkyBot, uSkyTop, hemi) * 0.55;
+  float NdotL = max(dot(N, L), 0.0);
+  float fill = max(dot(N, normalize(vec3(-0.6, 0.35, -0.7))), 0.0) * 0.28;
+
+  // Subsurface scattering for leaves, kelp, petals, cloth (positive sssOrEmissive in 0..1)
+  float sss = clamp(sssOrEmissive, 0.0, 1.0);
+  float backLight = pow(clamp(dot(V, -L + N * 0.35), 0.0, 1.0), 2.6) * sss * 0.72;
+  float wrapDiff = max((dot(N, L) + 0.38) / 1.38, 0.0) * sss * 0.28;
+
+  // Emissive boost (>1.0 in vMat.y means emissive intensity = vMat.y - 1.0)
+  float emissive = max(sssOrEmissive - 1.0, 0.0);
+
+  // Specular (Blinn-Phong scaled by roughness & metallic)
+  float shininess = mix(110.0, 8.0, rough * rough);
+  float specPow = pow(max(dot(N, H), 0.0), shininess);
+  float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.6);
+  vec3 specCol = mix(vec3(0.05 + 0.35 * (1.0 - rough)), vColor, metal);
+  vec3 spec = specCol * specPow * mix(0.95, 0.12, rough) * (1.0 + metal * 1.4);
+
+  // Ground bounce tint
+  float floorProx = exp(-max(vWorldPos.y + 1.8, 0.0) * 1.3);
+  vec3 bounce = uSkyBot * 0.22 * floorProx;
+
+  vec3 diff = vColor * (ambient + vec3(1.08, 1.03, 0.94) * (NdotL * 0.95 + wrapDiff) + vec3(0.55, 0.72, 0.96) * fill + bounce);
+  vec3 trans = vColor * vec3(1.15, 1.25, 0.65) * backLight;
+  vec3 rim = mix(vec3(0.55, 0.74, 0.98), vColor * 1.25, 0.45) * fresnel * (0.28 + 0.45 * (1.0 - rough));
+
+  vec3 col = diff * (1.0 - 0.55 * metal) + trans + spec + rim + vColor * emissive;
+
+  // Subtle depth fog
+  float dist = length(uCamPos - vWorldPos);
+  float fog = 1.0 - exp(-dist * dist * (uUnderwater > 0.5 ? 0.0042 : 0.0012));
+  vec3 fogCol = uUnderwater > 0.5 ? vec3(0.03, 0.11, 0.16) : vec3(0.07, 0.085, 0.115);
+  col = mix(col, fogCol, clamp(fog, 0.0, 0.75));
+
+  // Filmic ACES-ish tone map + sRGB
+  col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
+  col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
+  fragColor = vec4(col, 1.0);
+}
+`
+);
+
+// Debug Line + Point Shader (for XPBD particles & tension-colored constraints + subtle floor grid)
+const lineProgram = linkProgram(
+`#version 300 es
+precision highp float;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec4 aCol;
+uniform mat4 uViewProj;
+uniform float uPointSize;
+out vec4 vCol;
+void main() {
+  vCol = aCol;
+  gl_Position = uViewProj * vec4(aPos, 1.0);
+  gl_PointSize = uPointSize;
+}
+`,
+`#version 300 es
+precision highp float;
+in vec4 vCol;
+uniform float uRoundPoint;
+out vec4 fragColor;
+void main() {
+  float a = vCol.a;
+  if (uRoundPoint > 0.5) {
+    vec2 q = gl_PointCoord - 0.5;
+    float r = dot(q, q);
+    if (r > 0.25) discard;
+    a *= smoothstep(0.25, 0.12, r);
+  }
+  fragColor = vec4(vCol.rgb, a);
+}
+`
+);
+
+// Background Gradient Sky Shader
+const bgProgram = linkProgram(
+`#version 300 es
+precision highp float;
+out vec2 vUv;
+void main() {
+  vec2 p = vec2((gl_VertexID == 1) ? 3.0 : -1.0, (gl_VertexID == 2) ? 3.0 : -1.0);
+  vUv = p * 0.5 + 0.5;
+  gl_Position = vec4(p, 0.9999, 1.0);
+}
+`,
+`#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform vec3 uTop;
+uniform vec3 uBot;
+out vec4 fragColor;
+void main() {
+  float g = smoothstep(0.0, 1.0, vUv.y);
+  vec3 c = mix(uBot, uTop, g);
+  // subtle vignette
+  vec2 d = vUv - 0.5;
+  c *= 1.0 - dot(d, d) * 0.35;
+  fragColor = vec4(c, 1.0);
+}
+`
+);
+
+// =================================================================================================
+// 2. MATH & CAMERA UTILITIES
+// =================================================================================================
+function mat4Perspective(fovY, aspect, near, far) {
+  const f = 1 / Math.tan(fovY * 0.5);
+  const nf = 1 / (near - far);
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) * nf, -1,
+    0, 0, 2 * far * near * nf, 0
+  ]);
+}
+function mat4LookAt(eye, target, up) {
+  let zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
+  let rl = 1 / Math.hypot(zx, zy, zz); zx *= rl; zy *= rl; zz *= rl;
+  let xx = up[1]*zz - up[2]*zy, xy = up[2]*zx - up[0]*zz, xz = up[0]*zy - up[1]*zx;
+  rl = 1 / (Math.hypot(xx, xy, xz) || 1); xx *= rl; xy *= rl; xz *= rl;
+  const yx = zy*xz - zz*xy, yy = zz*xx - zx*xz, yz = zx*xy - zy*xx;
+  return new Float32Array([
+    xx, yx, zx, 0,
+    xy, yy, zy, 0,
+    xz, yz, zz, 0,
+    -(xx*eye[0] + xy*eye[1] + xz*eye[2]),
+    -(yx*eye[0] + yy*eye[1] + yz*eye[2]),
+    -(zx*eye[0] + zy*eye[1] + zz*eye[2]),
+    1
+  ]);
+}
+function mat4Mul(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) {
+    for (let r = 0; r < 4; r++) {
+      o[c*4 + r] = a[0*4+r]*b[c*4+0] + a[1*4+r]*b[c*4+1] + a[2*4+r]*b[c*4+2] + a[3*4+r]*b[c*4+3];
+    }
+  }
+  return o;
+}
+function mat4Invert(m) {
+  const inv = new Float32Array(16);
+  inv[0] = m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+  inv[4] = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+  inv[8] = m[4]*m[9]*m[15] - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+  inv[12] = -m[4]*m[9]*m[14] + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+  inv[1] = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+  inv[5] = m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+  inv[9] = -m[0]*m[9]*m[15] + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+  inv[13] = m[0]*m[9]*m[14] - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+  inv[2] = m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
+  inv[6] = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
+  inv[10] = m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
+  inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
+  inv[3] = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
+  inv[7] = m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
+  inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9] + m[4]*m[1]*m[11] - m[4]*m[3]*m[9] - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
+  inv[15] = m[0]*m[5]*m[10] - m[0]*m[6]*m[9] - m[4]*m[1]*m[10] + m[4]*m[2]*m[9] + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
+  let det = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+  if (Math.abs(det) < 1e-12) return inv;
+  det = 1 / det;
+  for (let i = 0; i < 16; i++) inv[i] *= det;
+  return inv;
+}
+
+function hash3(x, y, z) {
+  const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453123;
+  return s - Math.floor(s);
+}
+function curlWind(x, y, z, t, windStr, turbStr, pulse) {
+  const w = windStr + pulse;
+  const wx = w * (0.85 + 0.35 * Math.sin(t * 1.1 + z * 0.45 + y * 0.25));
+  const wz = w * 0.28 * Math.cos(t * 0.85 + x * 0.38);
+  const wy = w * 0.12 * Math.sin(t * 1.45 + x * 0.55 - z * 0.4);
+  const tx = Math.sin(y * 1.7 + t * 2.3) * Math.cos(z * 1.5 - t * 1.7);
+  const ty = Math.sin(z * 1.6 - t * 1.9) * Math.cos(x * 1.4 + t * 2.1);
+  const tz = Math.sin(x * 1.8 + t * 2.5) * Math.cos(y * 1.3 - t * 1.6);
+  return [wx + tx * turbStr, wy + ty * turbStr * 0.7, wz + tz * turbStr];
+}
+
+// =================================================================================================
+// 3. XPBD PARTICLE & CONSTRAINT ENGINE (Distance, Flexural Bend, Tearable Silk/Rope, Collider)
+// =================================================================================================
+class XpbdWorld {
+  constructor() {
+    this.reset();
+  }
+  reset() {
+    this.n = 0;
+    this.pos = [];      // flat Float32Array built on finalize()
+    this.prev = [];
+    this.rest = [];
+    this.vel = [];
+    this.invMass = [];
+    this.radius = [];
+    this.aeroScale = [];
+    this.pinned = [];
+
+    // Distance constraints: {a, b, restLen, stiffness, breakRatio, isStructural, broken, strain}
+    this.distCons = [];
+    // Bend / Posture constraints: {a, b, restLen, stiffness} (distance-2 or root-target spring)
+    this.bendCons = [];
+    // Posture target anchors (gentle spring toward rest shape for botanical stalks/fronds so they spring back!)
+    this.postureCons = []; // {i, tx, ty, tz, stiffness}
+
+    // Procedural 3D mesh descriptors bound directly to XPBD particle indices!
+    // Each descriptor reads LIVE this.pos[] every frame to skin 3D lit triangles!
+    this.tubes = [];      // {indices:[], rStart, rEnd, sides, colStart, colEnd, mat, capTip, taperPow}
+    this.chains = [];     // {indices:[], linkR, tubeR, col, mat}
+    this.leaves = [];     // {pIdx, nextIdx, side, angleOff, length, width, arch, colBase, colTip, mat, shape}
+    this.beads = [];      // {pIdx, radius, offset:[0,0,0], col, mat} (dewdrops, kelp gas bladders, insulators, cattail tips)
+    this.clothGrids = []; // {cols, rows, startIdx, colA, colB, mat}
+    this.staticProps = []; // {type, pos, scale, col, mat} (posts, reef rocks, flag pole)
+
+    this.tornCount = 0;
+    this.underwater = false;
+    this.groundY = -1.8;
+    this.collider = { pos: [0.0, 0.25, 0.45], radius: 0.48, enabled: true };
+    this.grabIdx = -1;
+    this.grabTarget = [0, 0, 0];
+  }
+
+  addParticle(x, y, z, invMass = 1.0, radius = 0.03, aeroScale = 1.0) {
+    const id = this.n++;
+    this._pos.push(x, y, z);
+    this._rest.push(x, y, z);
+    this._invMass.push(invMass);
+    this._radius.push(radius);
+    this._aero.push(aeroScale);
+    return id;
+  }
+
+  beginBuild() {
+    this.reset();
+    this._pos = [];
+    this._rest = [];
+    this._invMass = [];
+    this._radius = [];
+    this._aero = [];
+  }
+
+  addDist(a, b, stiffness = 1200, breakRatio = 0.0, isStructural = true, restScale = 1.0) {
+    const dx = this._pos[b*3] - this._pos[a*3];
+    const dy = this._pos[b*3+1] - this._pos[a*3+1];
+    const dz = this._pos[b*3+2] - this._pos[a*3+2];
+    const d = Math.hypot(dx, dy, dz) * restScale;
+    this.distCons.push({ a, b, restLen: Math.max(1e-4, d), stiffness, breakRatio, isStructural, broken: false, strain: 0 });
+    return this.distCons.length - 1;
+  }
+
+  addBend(a, b, stiffness = 25.0) {
+    const dx = this._pos[b*3] - this._pos[a*3];
+    const dy = this._pos[b*3+1] - this._pos[a*3+1];
+    const dz = this._pos[b*3+2] - this._pos[a*3+2];
+    const d = Math.hypot(dx, dy, dz);
+    this.bendCons.push({ a, b, restLen: Math.max(1e-4, d), stiffness });
+  }
+
+  addPosture(i, stiffness) {
+    this.postureCons.push({ i, tx: this._pos[i*3], ty: this._pos[i*3+1], tz: this._pos[i*3+2], stiffness });
+  }
+
+  finalize() {
+    this.pos = new Float32Array(this._pos);
+    this.prev = new Float32Array(this._pos);
+    this.rest = new Float32Array(this._rest);
+    this.vel = new Float32Array(this.n * 3);
+    this.invMass = new Float32Array(this._invMass);
+    this.radius = new Float32Array(this._radius);
+    this.aeroScale = new Float32Array(this._aero);
+    this.lambdaDist = new Float32Array(this.distCons.length);
+    this.lambdaBend = new Float32Array(this.bendCons.length);
+    this._pos = this._rest = this._invMass = this._radius = this._aero = null;
+  }
+
+  step(dtFrame, cfg, timeSec, windPulse) {
+    const substeps = cfg.substeps;
+    const h = Math.min(dtFrame, 1 / 30) / substeps;
+    const invH = 1 / h;
+    const invH2 = invH * invH;
+    const n = this.n;
+    const pos = this.pos, prev = this.prev, vel = this.vel, invM = this.invMass, rad = this.radius, aero = this.aeroScale;
+    const gravY = cfg.gravity;
+    const damp = Math.pow(cfg.damping, 1 / substeps);
+    const stretchMult = cfg.stretch / 1200.0;
+    const bendMult = cfg.bend;
+    const tearRatioGlobal = cfg.tearRatio;
+    const colOn = this.collider.enabled;
+    const cx = this.collider.pos[0], cy = this.collider.pos[1], cz = this.collider.pos[2], cr = this.collider.radius;
+
+    for (let s = 0; s < substeps; s++) {
+      const subT = timeSec + s * h;
+
+      // 1. External forces + Symplectic predict
+      for (let i = 0; i < n; i++) {
+        const w = invM[i];
+        const i3 = i * 3;
+        prev[i3] = pos[i3];
+        prev[i3+1] = pos[i3+1];
+        prev[i3+2] = pos[i3+2];
+        if (w <= 0) continue;
+
+        const wv = curlWind(pos[i3], pos[i3+1], pos[i3+2], subT, cfg.wind, cfg.turb, windPulse);
+        const drag = (this.underwater ? 3.2 : 1.55) * aero[i];
+        const ax = (wv[0] - vel[i3]) * drag;
+        const ay = gravY + (wv[1] - vel[i3+1]) * drag;
+        const az = (wv[2] - vel[i3+2]) * drag;
+
+        vel[i3]   = (vel[i3]   + ax * h) * damp;
+        vel[i3+1] = (vel[i3+1] + ay * h) * damp;
+        vel[i3+2] = (vel[i3+2] + az * h) * damp;
+
+        // Clamp max speed for stability
+        const sp2 = vel[i3]*vel[i3] + vel[i3+1]*vel[i3+1] + vel[i3+2]*vel[i3+2];
+        if (sp2 > 144.0) {
+          const sc = 12.0 / Math.sqrt(sp2);
+          vel[i3] *= sc; vel[i3+1] *= sc; vel[i3+2] *= sc;
+        }
+
+        pos[i3]   += vel[i3] * h;
+        pos[i3+1] += vel[i3+1] * h;
+        pos[i3+2] += vel[i3+2] * h;
+      }
+
+      // Interactive grab pin
+      if (this.grabIdx >= 0 && this.grabIdx < n) {
+        const g3 = this.grabIdx * 3;
+        pos[g3]   = pos[g3]   * 0.25 + this.grabTarget[0] * 0.75;
+        pos[g3+1] = pos[g3+1] * 0.25 + this.grabTarget[1] * 0.75;
+        pos[g3+2] = pos[g3+2] * 0.25 + this.grabTarget[2] * 0.75;
+      }
+
+      this.lambdaDist.fill(0);
+      this.lambdaBend.fill(0);
+
+      // 2. XPBD Constraint Projection (Gauss-Seidel)
+      const dc = this.distCons;
+      for (let k = 0; k < dc.length; k++) {
+        const c = dc[k];
+        if (c.broken) continue;
+        const a3 = c.a * 3, b3 = c.b * 3;
+        const wa = (c.a === this.grabIdx) ? 0 : invM[c.a];
+        const wb = (c.b === this.grabIdx) ? 0 : invM[c.b];
+        const wSum = wa + wb;
+        if (wSum <= 0) continue;
+
+        const dx = pos[b3] - pos[a3];
+        const dy = pos[b3+1] - pos[a3+1];
+        const dz = pos[b3+2] - pos[a3+2];
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist < 1e-6) continue;
+
+        const ratio = dist / c.restLen;
+        c.strain = Math.abs(ratio - 1.0);
+        const br = (c.breakRatio > 0 && tearRatioGlobal > 0) ? (c.breakRatio * (tearRatioGlobal / 2.4)) : 0;
+        if (br > 1.05 && ratio > br) {
+          c.broken = true;
+          this.tornCount++;
+          continue;
+        }
+
+        const C = dist - c.restLen;
+        const kEff = Math.max(10.0, c.stiffness * stretchMult);
+        const alphaTilde = invH2 / kEff;
+        const dl = (-C - alphaTilde * this.lambdaDist[k]) / (wSum + alphaTilde);
+        this.lambdaDist[k] += dl;
+        const corr = dl / dist;
+        if (wa > 0) {
+          pos[a3]   -= dx * corr * wa;
+          pos[a3+1] -= dy * corr * wa;
+          pos[a3+2] -= dz * corr * wa;
+        }
+        if (wb > 0) {
+          pos[b3]   += dx * corr * wb;
+          pos[b3+1] += dy * corr * wb;
+          pos[b3+2] += dz * corr * wb;
+        }
+      }
+
+      // 3. Flexural Bending Constraints (distance-2)
+      if (bendMult > 0.005) {
+        const bc = this.bendCons;
+        for (let k = 0; k < bc.length; k++) {
+          const c = bc[k];
+          const a3 = c.a * 3, b3 = c.b * 3;
+          const wa = (c.a === this.grabIdx) ? 0 : invM[c.a];
+          const wb = (c.b === this.grabIdx) ? 0 : invM[c.b];
+          const wSum = wa + wb;
+          if (wSum <= 0) continue;
+          const dx = pos[b3] - pos[a3], dy = pos[b3+1] - pos[a3+1], dz = pos[b3+2] - pos[a3+2];
+          const dist = Math.hypot(dx, dy, dz);
+          if (dist < 1e-6) continue;
+          const C = dist - c.restLen;
+          const kEff = Math.max(0.5, c.stiffness * bendMult * 3.5);
+          const alphaTilde = invH2 / kEff;
+          const dl = (-C - alphaTilde * this.lambdaBend[k]) / (wSum + alphaTilde);
+          this.lambdaBend[k] += dl;
+          const corr = dl / dist;
+          if (wa > 0) { pos[a3] -= dx*corr*wa; pos[a3+1] -= dy*corr*wa; pos[a3+2] -= dz*corr*wa; }
+          if (wb > 0) { pos[b3] += dx*corr*wb; pos[b3+1] += dy*corr*wb; pos[b3+2] += dz*corr*wb; }
+        }
+      }
+
+      // 4. Botanical Posture / Stem Elasticity (springs fern fronds, reeds & anemone back to natural arch!)
+      if (bendMult > 0.005) {
+        const pc = this.postureCons;
+        for (let k = 0; k < pc.length; k++) {
+          const c = pc[k];
+          if (c.i === this.grabIdx) continue;
+          const w = invM[c.i];
+          if (w <= 0) continue;
+          const i3 = c.i * 3;
+          const kP = c.stiffness * (0.25 + 1.65 * bendMult);
+          const blend = Math.min(0.45, kP * h * h * w);
+          pos[i3]   += (c.tx - pos[i3]) * blend;
+          pos[i3+1] += (c.ty - pos[i3+1]) * blend;
+          pos[i3+2] += (c.tz - pos[i3+2]) * blend;
+        }
+      }
+
+      // 5. Ground & Draggable Sphere Collider Projection
+      for (let i = 0; i < n; i++) {
+        if (invM[i] <= 0) continue;
+        const i3 = i * 3;
+        const floorY = this.groundY + rad[i];
+        if (pos[i3+1] < floorY) {
+          pos[i3+1] = floorY;
+          prev[i3]   = prev[i3]   * 0.8 + pos[i3]   * 0.2;
+          prev[i3+2] = prev[i3+2] * 0.8 + pos[i3+2] * 0.2;
+        }
+        if (colOn) {
+          const dx = pos[i3] - cx, dy = pos[i3+1] - cy, dz = pos[i3+2] - cz;
+          const minR = cr + rad[i];
+          const d2 = dx*dx + dy*dy + dz*dz;
+          if (d2 < minR * minR && d2 > 1e-8) {
+            const d = Math.sqrt(d2);
+            const push = (minR - d) / d;
+            pos[i3] += dx * push;
+            pos[i3+1] += dy * push;
+            pos[i3+2] += dz * push;
+          }
+        }
+      }
+
+      // 6. Velocity derivation from XPBD position update
+      for (let i = 0; i < n; i++) {
+        if (invM[i] <= 0) {
+          const i3 = i * 3; vel[i3] = vel[i3+1] = vel[i3+2] = 0; continue;
+        }
+        const i3 = i * 3;
+        vel[i3]   = (pos[i3]   - prev[i3])   * invH;
+        vel[i3+1] = (pos[i3+1] - prev[i3+1]) * invH;
+        vel[i3+2] = (pos[i3+2] - prev[i3+2]) * invH;
+      }
+    }
+  }
+}
+
+// =================================================================================================
+// 4. PROCEDURAL 3D MESH SKINNING ENGINE (Driven Directly by Live XPBD Particles Every Frame!)
+// =================================================================================================
+class DynamicMeshBuilder {
+  constructor() {
+    this.capFloats = 12 * 120000; // 12 floats per vertex (pos3, norm3, col3, mat3)
+    this.vBuf = new Float32Array(this.capFloats);
+    this.vCount = 0;
+  }
+  clear() { this.vCount = 0; }
+  ensure(addVerts) {
+    const need = (this.vCount + addVerts) * 12;
+    if (need > this.vBuf.length) {
+      const next = new Float32Array(Math.max(need, this.vBuf.length * 2));
+      next.set(this.vBuf);
+      this.vBuf = next;
+    }
+  }
+  pushVert(px, py, pz, nx, ny, nz, r, g, b, rough, sss, metal) {
+    const o = this.vCount * 12;
+    this.vBuf[o] = px; this.vBuf[o+1] = py; this.vBuf[o+2] = pz;
+    this.vBuf[o+3] = nx; this.vBuf[o+4] = ny; this.vBuf[o+5] = nz;
+    this.vBuf[o+6] = r;  this.vBuf[o+7] = g;  this.vBuf[o+8] = b;
+    this.vBuf[o+9] = rough; this.vBuf[o+10] = sss; this.vBuf[o+11] = metal;
+    this.vCount++;
+  }
+  pushTriFlat(ax,ay,az, bx,by,bz, cx,cy,cz, r,g,b, rough,sss,metal) {
+    this.ensure(3);
+    const ux = bx-ax, uy = by-ay, uz = bz-az;
+    const vx = cx-ax, vy = cy-ay, vz = cz-az;
+    let nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    this.pushVert(ax,ay,az, nx,ny,nz, r,g,b, rough,sss,metal);
+    this.pushVert(bx,by,bz, nx,ny,nz, r,g,b, rough,sss,metal);
+    this.pushVert(cx,cy,cz, nx,ny,nz, r,g,b, rough,sss,metal);
+  }
+
+  // Smooth parallel-transport 3D cylindrical tube skinned along an XPBD particle chain
+  addTube(world, tube) {
+    const idx = tube.indices;
+    const m = idx.length;
+    if (m < 2) return;
+    const sides = tube.sides || 6;
+    const pos = world.pos;
+
+    // Check if any internal edge was torn — if so, split cleanly into unbroken sub-chains!
+    let segStart = 0;
+    for (let k = 0; k < m; k++) {
+      let split = (k === m - 1);
+      if (!split && tube.edgeIds && tube.edgeIds[k] >= 0 && world.distCons[tube.edgeIds[k]].broken) {
+        split = true;
+      }
+      if (split) {
+        const len = k - segStart + 1;
+        if (len >= 2) this._emitTubeSpan(pos, idx, segStart, k, m, sides, tube);
+        segStart = k + 1;
+      }
+    }
+  }
+
+  _emitTubeSpan(pos, idx, s0, s1, totalM, sides, tube) {
+    const count = s1 - s0 + 1;
+    this.ensure((count - 1) * sides * 6 + sides * 3);
+    const rings = [];
+    let nx = 1, ny = 0, nz = 0;
+
+    for (let k = s0; k <= s1; k++) {
+      const p = idx[k] * 3;
+      const px = pos[p], py = pos[p+1], pz = pos[p+2];
+      // Compute tangent along XPBD chain
+      const pPrev = idx[Math.max(s0, k - 1)] * 3;
+      const pNext = idx[Math.min(s1, k + 1)] * 3;
+      let tx = pos[pNext] - pos[pPrev], ty = pos[pNext+1] - pos[pPrev+1], tz = pos[pNext+2] - pos[pPrev+2];
+      let tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+
+      if (k === s0) {
+        // Initial perpendicular frame
+        const ux = Math.abs(ty) < 0.9 ? 0 : 1, uy = Math.abs(ty) < 0.9 ? 1 : 0, uz = 0;
+        nx = ty*uz - tz*uy; ny = tz*ux - tx*uz; nz = tx*uy - ty*ux;
+        const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      } else {
+        // Parallel-transport orthogonalization
+        const d = nx*tx + ny*ty + nz*tz;
+        nx -= tx*d; ny -= ty*d; nz -= tz*d;
+        const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      }
+      const bx = ty*nz - tz*ny, by = tz*nx - tx*nz, bz = tx*ny - ty*nx;
+
+      const u = k / Math.max(1, totalM - 1);
+      const tPow = Math.pow(u, tube.taperPow || 1.0);
+      const rad = tube.rStart + (tube.rEnd - tube.rStart) * tPow;
+      const cr = tube.colStart[0] + (tube.colEnd[0] - tube.colStart[0]) * u;
+      const cg = tube.colStart[1] + (tube.colEnd[1] - tube.colStart[1]) * u;
+      const cb = tube.colStart[2] + (tube.colEnd[2] - tube.colStart[2]) * u;
+
+      const ring = [];
+      for (let j = 0; j < sides; j++) {
+        const a = (j / sides) * Math.PI * 2;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const rnx = nx*ca + bx*sa, rny = ny*ca + by*sa, rnz = nz*ca + bz*sa;
+        ring.push([px + rnx*rad, py + rny*rad, pz + rnz*rad, rnx, rny, rnz, cr, cg, cb]);
+      }
+      rings.push(ring);
+    }
+
+    const [rough, sss, metal] = tube.mat;
+    for (let r = 0; r < rings.length - 1; r++) {
+      const A = rings[r], B = rings[r+1];
+      for (let j = 0; j < sides; j++) {
+        const j2 = (j + 1) % sides;
+        const a0 = A[j], a1 = A[j2], b0 = B[j], b1 = B[j2];
+        this.pushVert(a0[0],a0[1],a0[2], a0[3],a0[4],a0[5], a0[6],a0[7],a0[8], rough, sss, metal);
+        this.pushVert(b0[0],b0[1],b0[2], b0[3],b0[4],b0[5], b0[6],b0[7],b0[8], rough, sss, metal);
+        this.pushVert(b1[0],b1[1],b1[2], b1[3],b1[4],b1[5], b1[6],b1[7],b1[8], rough, sss, metal);
+
+        this.pushVert(a0[0],a0[1],a0[2], a0[3],a0[4],a0[5], a0[6],a0[7],a0[8], rough, sss, metal);
+        this.pushVert(b1[0],b1[1],b1[2], b1[3],b1[4],b1[5], b1[6],b1[7],b1[8], rough, sss, metal);
+        this.pushVert(a1[0],a1[1],a1[2], a1[3],a1[4],a1[5], a1[6],a1[7],a1[8], rough, sss, metal);
+      }
+    }
+  }
+
+  // Interlocking 3D metallic chain links oriented along each XPBD edge (alternating 90 deg twist!)
+  addChain(world, chain) {
+    const idx = chain.indices;
+    const pos = world.pos;
+    const [cr, cg, cb] = chain.col;
+    const [rough, sss, metal] = chain.mat;
+    const segs = 10, cross = 5;
+
+    for (let k = 0; k < idx.length - 1; k++) {
+      if (chain.edgeIds && chain.edgeIds[k] >= 0 && world.distCons[chain.edgeIds[k]].broken) continue;
+      const a3 = idx[k]*3, b3 = idx[k+1]*3;
+      const mx = 0.5*(pos[a3]+pos[b3]), my = 0.5*(pos[a3+1]+pos[b3+1]), mz = 0.5*(pos[a3+2]+pos[b3+2]);
+      let tx = pos[b3]-pos[a3], ty = pos[b3+1]-pos[a3+1], tz = pos[b3+2]-pos[a3+2];
+      const len = Math.hypot(tx, ty, tz) || 0.01;
+      tx /= len; ty /= len; tz /= len;
+      const ux = Math.abs(ty) < 0.9 ? 0 : 1, uy = Math.abs(ty) < 0.9 ? 1 : 0, uz = 0;
+      let nx = ty*uz - tz*uy, ny = tz*ux - tx*uz, nz = tx*uy - ty*ux;
+      const nl = Math.hypot(nx, ny, nz) || 1; nx /= nl; ny /= nl; nz /= nl;
+      let bx = ty*nz - tz*ny, by = tz*nx - tx*nz, bz = tx*ny - ty*nx;
+      if (k & 1) { // alternate 90° twist for real interlocking chain geometry!
+        const ox = nx, oy = ny, oz = nz;
+        nx = bx; ny = by; nz = bz;
+        bx = -ox; by = -oy; bz = -oz;
+      }
+
+      const rx = len * 0.62, ry = chain.linkR, tr = chain.tubeR;
+      this.ensure(segs * cross * 6);
+      const ringPts = [];
+      for (let i = 0; i < segs; i++) {
+        const th = (i / segs) * Math.PI * 2;
+        const c = Math.cos(th), s = Math.sin(th);
+        // Oval stadium loop center
+        const cx = mx + tx * (c * rx) + nx * (s * ry);
+        const cy = my + ty * (c * rx) + ny * (s * ry);
+        const cz = mz + tz * (c * rx) + nz * (s * ry);
+        // Outward normal in link plane
+        let onx = tx * (c * ry) + nx * (s * rx);
+        let ony = ty * (c * ry) + ny * (s * rx);
+        let onz = tz * (c * ry) + nz * (s * rx);
+        const ol = Math.hypot(onx, ony, onz) || 1; onx /= ol; ony /= ol; onz /= ol;
+        const ring = [];
+        for (let j = 0; j < cross; j++) {
+          const ph = (j / cross) * Math.PI * 2;
+          const cp = Math.cos(ph), sp = Math.sin(ph);
+          const vnx = onx*cp + bx*sp, vny = ony*cp + by*sp, vnz = onz*cp + bz*sp;
+          ring.push([cx + vnx*tr, cy + vny*tr, cz + vnz*tr, vnx, vny, vnz]);
+        }
+        ringPts.push(ring);
+      }
+      for (let i = 0; i < segs; i++) {
+        const A = ringPts[i], B = ringPts[(i+1)%segs];
+        for (let j = 0; j < cross; j++) {
+          const j2 = (j+1)%cross;
+          const a0=A[j], a1=A[j2], b0=B[j], b1=B[j2];
+          this.pushVert(a0[0],a0[1],a0[2], a0[3],a0[4],a0[5], cr,cg,cb, rough,sss,metal);
+          this.pushVert(b0[0],b0[1],b0[2], b0[3],b0[4],b0[5], cr,cg,cb, rough,sss,metal);
+          this.pushVert(b1[0],b1[1],b1[2], b1[3],b1[4],b1[5], cr,cg,cb, rough,sss,metal);
+          this.pushVert(a0[0],a0[1],a0[2], a0[3],a0[4],a0[5], cr,cg,cb, rough,sss,metal);
+          this.pushVert(b1[0],b1[1],b1[2], b1[3],b1[4],b1[5], cr,cg,cb, rough,sss,metal);
+          this.pushVert(a1[0],a1[1],a1[2], a1[3],a1[4],a1[5], cr,cg,cb, rough,sss,metal);
+        }
+      }
+    }
+  }
+
+  // Curved 3D Botanical Leaf / Fern Pinna / Kelp Blade skinned to XPBD particle tangent frame!
+  addLeaf(world, lf, timeSec) {
+    const pos = world.pos;
+    const p3 = lf.pIdx * 3, n3 = lf.nextIdx * 3;
+    const px = pos[p3], py = pos[p3+1], pz = pos[p3+2];
+    let tx = pos[n3] - px, ty = pos[n3+1] - py, tz = pos[n3+2] - pz;
+    const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+
+    // Build stable stem-oriented frame
+    const ux = Math.abs(ty) < 0.9 ? 0 : 1, uy = Math.abs(ty) < 0.9 ? 1 : 0, uz = 0;
+    let sx = ty*uz - tz*uy, sy = tz*ux - tx*uz, sz = tx*uy - ty*ux;
+    const sl = Math.hypot(sx, sy, sz) || 1; sx /= sl; sy /= sl; sz /= sl;
+    const bx = ty*sz - tz*sy, by = tz*sx - tx*sz, bz = tx*sy - ty*sx;
+
+    // Rotate around stem by angleOff + slight flutter from particle velocity
+    const vel = world.vel;
+    const vSp = Math.hypot(vel[p3], vel[p3+1], vel[p3+2]);
+    const flutter = Math.sin(timeSec * 5.2 + lf.pIdx * 1.7) * (0.06 + Math.min(0.28, vSp * 0.08));
+    const ang = lf.angleOff + flutter;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const outX = (sx*ca + bx*sa) * lf.side;
+    const outY = (sy*ca + by*sa) * lf.side;
+    const outZ = (sz*ca + bz*sa) * lf.side;
+    // Leaf direction combines outward + slight forward pitch along stem
+    let dx = outX * 0.86 + tx * lf.pitch, dy = outY * 0.86 + ty * lf.pitch, dz = outZ * 0.86 + tz * lf.pitch;
+    const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
+    // Cross width axis
+    let wx = dy*tz - dz*ty, wy = dz*tx - dx*tz, wz = dx*ty - dy*tx;
+    const wl = Math.hypot(wx, wy, wz) || 1; wx /= wl; wy /= wl; wz /= wl;
+    // Leaf surface normal (for arch curvature)
+    const nx = wy*dz - wz*dy, ny = wz*dx - wx*dz, nz = wx*dy - wy*dx;
+
+    const L = lf.length, W = lf.width, arch = lf.arch;
+    const [r0,g0,b0] = lf.colBase, [r1,g1,b1] = lf.colTip;
+    const [rough, sss, metal] = lf.mat;
+
+    // 3-section curved 3D blade (base -> mid1 -> mid2 -> tip) with central midrib crease!
+    const segs = 3;
+    const pts = [];
+    for (let i = 0; i <= segs; i++) {
+      const u = i / segs;
+      const ripple = lf.kelp ? Math.sin(u * 8.0 + timeSec * 3.5 + lf.pIdx) * W * 0.35 : 0;
+      const wScale = Math.sin(Math.pow(u, 0.72) * Math.PI) * W;
+      const droop = -arch * u * u * L;
+      const cx = px + dx * (u * L) + nx * droop;
+      const cy = py + dy * (u * L) + ny * droop;
+      const cz = pz + dz * (u * L) + nz * droop;
+      const crease = wScale * 0.14;
+      pts.push({
+        c: [cx - nx*crease, cy - ny*crease, cz - nz*crease],
+        l: [cx - wx*wScale + nx*ripple, cy - wy*wScale + ny*ripple, cz - wz*wScale + nz*ripple],
+        r: [cx + wx*wScale - nx*ripple, cy + wy*wScale - ny*ripple, cz + wz*wScale - nz*ripple],
+        col: [r0+(r1-r0)*u, g0+(g1-g0)*u, b0+(b1-b0)*u]
+      });
+    }
+    for (let i = 0; i < segs; i++) {
+      const A = pts[i], B = pts[i+1];
+      const cr = 0.5*(A.col[0]+B.col[0]), cg = 0.5*(A.col[1]+B.col[1]), cb = 0.5*(A.col[2]+B.col[2]);
+      // Left half
+      this.pushTriFlat(A.c[0],A.c[1],A.c[2], A.l[0],A.l[1],A.l[2], B.c[0],B.c[1],B.c[2], cr,cg,cb, rough,sss,metal);
+      if (i < segs - 1) this.pushTriFlat(A.l[0],A.l[1],A.l[2], B.l[0],B.l[1],B.l[2], B.c[0],B.c[1],B.c[2], cr,cg,cb, rough,sss,metal);
+      // Right half
+      this.pushTriFlat(A.c[0],A.c[1],A.c[2], B.c[0],B.c[1],B.c[2], A.r[0],A.r[1],A.r[2], cr,cg,cb, rough,sss,metal);
+      if (i < segs - 1) this.pushTriFlat(A.r[0],A.r[1],A.r[2], B.c[0],B.c[1],B.c[2], B.r[0],B.r[1],B.r[2], cr,cg,cb, rough,sss,metal);
+    }
+  }
+
+  // Smooth UV sphere (for dewdrops, kelp gas bladders, collider sphere, cattail heads, anchor bolts)
+  addSphere(cx, cy, cz, rx, ry, rz, col, mat, rings = 6, segs = 10) {
+    this.ensure(rings * segs * 6);
+    const [cr,cg,cb] = col, [rough, sss, metal] = mat;
+    for (let i = 0; i < rings; i++) {
+      const p0 = (i / rings) * Math.PI, p1 = ((i+1) / rings) * Math.PI;
+      const sp0 = Math.sin(p0), cp0 = Math.cos(p0), sp1 = Math.sin(p1), cp1 = Math.cos(p1);
+      for (let j = 0; j < segs; j++) {
+        const t0 = (j / segs) * Math.PI * 2, t1 = ((j+1) / segs) * Math.PI * 2;
+        const ct0 = Math.cos(t0), st0 = Math.sin(t0), ct1 = Math.cos(t1), st1 = Math.sin(t1);
+        const v00 = [sp0*ct0, cp0, sp0*st0], v10 = [sp1*ct0, cp1, sp1*st0];
+        const v11 = [sp1*ct1, cp1, sp1*st1], v01 = [sp0*ct1, cp0, sp0*st1];
+        this.pushVert(cx+v00[0]*rx, cy+v00[1]*ry, cz+v00[2]*rz, v00[0],v00[1],v00[2], cr,cg,cb, rough,sss,metal);
+        this.pushVert(cx+v10[0]*rx, cy+v10[1]*ry, cz+v10[2]*rz, v10[0],v10[1],v10[2], cr,cg,cb, rough,sss,metal);
+        this.pushVert(cx+v11[0]*rx, cy+v11[1]*ry, cz+v11[2]*rz, v11[0],v11[1],v11[2], cr,cg,cb, rough,sss,metal);
+        this.pushVert(cx+v00[0]*rx, cy+v00[1]*ry, cz+v00[2]*rz, v00[0],v00[1],v00[2], cr,cg,cb, rough,sss,metal);
+        this.pushVert(cx+v11[0]*rx, cy+v11[1]*ry, cz+v11[2]*rz, v11[0],v11[1],v11[2], cr,cg,cb, rough,sss,metal);
+        this.pushVert(cx+v01[0]*rx, cy+v01[1]*ry, cz+v01[2]*rz, v01[0],v01[1],v01[2], cr,cg,cb, rough,sss,metal);
+      }
+    }
+  }
+
+  // Smooth Cloth Mesh skinned directly from a 2D XPBD particle grid (skipping torn quads!)
+  addClothGrid(world, cg) {
+    const { cols, rows, startIdx, colA, colB, mat, edgeGrid } = cg;
+    const pos = world.pos;
+    const nGrid = cols * rows;
+    const norms = new Float32Array(nGrid * 3);
+
+    // Accumulate smooth vertex normals from live XPBD particle positions
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        const i00 = r*cols + c, i10 = i00 + 1, i01 = i00 + cols, i11 = i01 + 1;
+        const p00 = (startIdx+i00)*3, p10 = (startIdx+i10)*3, p01 = (startIdx+i01)*3, p11 = (startIdx+i11)*3;
+        const ux = pos[p10]-pos[p00], uy = pos[p10+1]-pos[p00+1], uz = pos[p10+2]-pos[p00+2];
+        const vx = pos[p01]-pos[p00], vy = pos[p01+1]-pos[p00+1], vz = pos[p01+2]-pos[p00+2];
+        const nx = uy*vz - uz*vy, ny = uz*vx - ux*vz, nz = ux*vy - uy*vx;
+        for (const k of [i00, i10, i01, i11]) {
+          norms[k*3] += nx; norms[k*3+1] += ny; norms[k*3+2] += nz;
+        }
+      }
+    }
+    for (let i = 0; i < nGrid; i++) {
+      const l = Math.hypot(norms[i*3], norms[i*3+1], norms[i*3+2]) || 1;
+      norms[i*3] /= l; norms[i*3+1] /= l; norms[i*3+2] /= l;
+    }
+
+    this.ensure((cols-1)*(rows-1)*6);
+    const [rough, sss, metal] = mat;
+    for (let r = 0; r < rows - 1; r++) {
+      for (let c = 0; c < cols - 1; c++) {
+        // Skip quad if any bounding structural edge broke
+        if (edgeGrid) {
+          const eH = edgeGrid.h[r*(cols-1)+c], eV = edgeGrid.v[r*cols+c];
+          const eH2 = edgeGrid.h[(r+1)*(cols-1)+c], eV2 = edgeGrid.v[r*cols+(c+1)];
+          if ((eH >= 0 && world.distCons[eH].broken) || (eV >= 0 && world.distCons[eV].broken) ||
+              (eH2 >= 0 && world.distCons[eH2].broken) || (eV2 >= 0 && world.distCons[eV2].broken)) {
+            continue;
+          }
+        }
+        const u = c / (cols - 1), v = r / (rows - 1);
+        const stripe = ((Math.floor(u * 6) + Math.floor(v * 6)) & 1) ? 0.14 : 0.0;
+        const mixT = v * 0.8 + stripe;
+        const cr = colA[0] + (colB[0]-colA[0])*mixT;
+        const cgC = colA[1] + (colB[1]-colA[1])*mixT;
+        const cb = colA[2] + (colB[2]-colA[2])*mixT;
+
+        const ids = [r*cols+c, r*cols+c+1, (r+1)*cols+c+1, (r+1)*cols+c];
+        const emit = (k) => {
+          const p3 = (startIdx+k)*3, n3 = k*3;
+          this.pushVert(pos[p3],pos[p3+1],pos[p3+2], norms[n3],norms[n3+1],norms[n3+2], cr,cgC,cb, rough,sss,metal);
+        };
+        emit(ids[0]); emit(ids[1]); emit(ids[2]);
+        emit(ids[0]); emit(ids[2]); emit(ids[3]);
+      }
+    }
+  }
+
+  buildFromWorld(world, timeSec, showCollider) {
+    this.clear();
+    // Static hardware / reef rocks / posts
+    for (const st of world.staticProps) {
+      this.addSphere(st.pos[0], st.pos[1], st.pos[2], st.scale[0], st.scale[1], st.scale[2], st.col, st.mat, 8, 12);
+    }
+    // 1. Tubes (Spiderweb silk, cables, vine stems, fern rachis, reed stalks, kelp stipes, anemone tentacles)
+    for (const tb of world.tubes) this.addTube(world, tb);
+    // 2. Interlocking 3D metallic chain links
+    for (const ch of world.chains) this.addChain(world, ch);
+    // 3. Curved 3D leaves / fern pinnae / kelp blades
+    for (const lf of world.leaves) this.addLeaf(world, lf, timeSec);
+    // 4. Particle-bound 3D beads (morning dewdrops, kelp gas bladders, cattail heads, cable markers)
+    const pos = world.pos;
+    for (const bd of world.beads) {
+      const p3 = bd.pIdx * 3;
+      this.addSphere(pos[p3]+bd.offset[0], pos[p3+1]+bd.offset[1], pos[p3+2]+bd.offset[2],
+        bd.rx, bd.ry, bd.rz, bd.col, bd.mat, bd.rings || 5, bd.segs || 8);
+    }
+    // 5. Woven cloth meshes
+    for (const cg of world.clothGrids) this.addClothGrid(world, cg);
+    // 6. Interactive 3D Collider Sphere
+    if (showCollider && world.collider.enabled) {
+      const c = world.collider;
+      this.addSphere(c.pos[0], c.pos[1], c.pos[2], c.radius, c.radius, c.radius, [0.32, 0.56, 0.85], [0.14, 0.15, 0.35], 14, 22);
+    }
+  }
+}
+
+// =================================================================================================
+// 5. SEVEN XPBD PARTICLE-DRIVEN MESH SCENES (Spiderwebs, Cables/Chains, Vines, Ferns, Reeds, Kelp, Cloth)
+// =================================================================================================
+function addOrbSpiderweb(world, ox, oy, oz, webR, spokes = 14, rings = 7) {
+  const hub = world.addParticle(ox, oy, oz, 1.0, 0.02, 1.4);
+  const grid = []; // grid[s][r]
+  for (let s = 0; s < spokes; s++) {
+    const a = (s / spokes) * Math.PI * 2 + 0.12;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const row = [hub];
+    const edges = [];
+    for (let r = 1; r <= rings; r++) {
+      const frac = Math.pow(r / rings, 1.08);
+      const rad = webR * frac;
+      const isAnchor = (r === rings);
+      const px = ox + ca * rad;
+      const py = oy + sa * rad;
+      const pz = oz + Math.sin(a * 2.0) * 0.04 * frac;
+      const pid = world.addParticle(px, py, pz, isAnchor ? 0.0 : 1.0, 0.018, 1.5);
+      row.push(pid);
+      const eId = world.addDist(row[r-1], pid, 1600, 1.9, true, 0.99);
+      edges.push(eId);
+      // Morning dewdrop beads along radial spokes!
+      if (!isAnchor && ((s + r) % 3 === 0)) {
+        world.beads.push({ pIdx: pid, rx: 0.026, ry: 0.032, rz: 0.026, offset: [0, -0.015, 0],
+          col: [0.76, 0.92, 1.0], mat: [0.07, 0.45, 0.15], rings: 5, segs: 8 });
+      }
+      if (isAnchor) {
+        world.staticProps.push({ pos: [px, py, pz], scale: [0.045, 0.045, 0.045], col: [0.32, 0.28, 0.24], mat: [0.75, 0.0, 0.1] });
+      }
+    }
+    grid.push(row);
+    world.tubes.push({
+      indices: row, edgeIds: edges, rStart: 0.013, rEnd: 0.010, sides: 5,
+      colStart: [0.88, 0.93, 0.98], colEnd: [0.78, 0.86, 0.94], mat: [0.18, 0.35, 0.12]
+    });
+  }
+  // Concentric capture spiral rings (tearable!)
+  for (let r = 1; r < rings; r++) {
+    const ringIdx = [];
+    const ringEdges = [];
+    for (let s = 0; s < spokes; s++) {
+      const a = grid[s][r], b = grid[(s + 1) % spokes][r];
+      const eId = world.addDist(a, b, 950, 1.75, true, 0.995);
+      ringIdx.push(a);
+      ringEdges.push(eId);
+    }
+    ringIdx.push(grid[0][r]);
+    world.tubes.push({
+      indices: ringIdx, edgeIds: ringEdges, rStart: 0.009, rEnd: 0.009, sides: 4,
+      colStart: [0.85, 0.92, 1.0], colEnd: [0.85, 0.92, 1.0], mat: [0.15, 0.42, 0.1]
+    });
+  }
+}
+
+function addHangingVine(world, x, yTop, z, segs, len, leafDensity = 1) {
+  const idx = [], edges = [];
+  for (let i = 0; i <= segs; i++) {
+    const u = i / segs;
+    const pid = world.addParticle(x + Math.sin(u*3.0 + x)*0.08, yTop - u * len, z + Math.cos(u*2.5 + z)*0.08,
+      i === 0 ? 0.0 : 1.0, 0.025, 1.25);
+    idx.push(pid);
+    if (i > 0) edges.push(world.addDist(idx[i-1], pid, 1500, 2.8, true));
+    if (i > 1) world.addBend(idx[i-2], pid, 18.0);
+    if (i >= 1 && i < segs && (i % leafDensity === 0)) {
+      const side = (i & 1) ? 1 : -1;
+      world.leaves.push({
+        pIdx: pid, nextIdx: idx[i-1], side, angleOff: i * 1.15 + x, pitch: -0.32,
+        length: 0.24 + 0.11 * (1 - Math.abs(u - 0.5)), width: 0.095, arch: 0.35,
+        colBase: [0.09, 0.38, 0.14], colTip: [0.28, 0.68, 0.22], mat: [0.34, 0.72, 0.0]
+      });
+      world.leaves.push({
+        pIdx: pid, nextIdx: idx[i-1], side: -side, angleOff: i * 1.15 + x + 0.45, pitch: -0.25,
+        length: 0.20 + 0.08 * (1 - u), width: 0.08, arch: 0.38,
+        colBase: [0.08, 0.34, 0.12], colTip: [0.22, 0.60, 0.19], mat: [0.36, 0.68, 0.0]
+      });
+    }
+  }
+  world.tubes.push({
+    indices: idx, edgeIds: edges, rStart: 0.024, rEnd: 0.008, sides: 6,
+    colStart: [0.22, 0.32, 0.14], colEnd: [0.16, 0.46, 0.17], mat: [0.55, 0.22, 0.0]
+  });
+}
+
+function addFernCluster(world, ox, oy, oz, frondCount = 9) {
+  // Root crown mound
+  world.staticProps.push({ pos: [ox, oy - 0.05, oz], scale: [0.32, 0.14, 0.32], col: [0.18, 0.15, 0.11], mat: [0.88, 0.0, 0.0] });
+  for (let f = 0; f < frondCount; f++) {
+    const az = (f / frondCount) * Math.PI * 2 + hash3(f, ox, oz) * 0.4;
+    const len = 1.35 + hash3(f, 2, 3) * 0.65;
+    const elev = 0.72 + hash3(f, 5, 7) * 0.45;
+    const segs = 10;
+    const idx = [], edges = [];
+    for (let i = 0; i <= segs; i++) {
+      const u = i / segs;
+      const rOut = u * len * 0.85;
+      const archY = Math.sin(u * Math.PI * 0.78) * len * elev * 0.62 - u * u * 0.32;
+      const px = ox + Math.cos(az) * rOut;
+      const py = oy + Math.max(0.02, archY);
+      const pz = oz + Math.sin(az) * rOut;
+      const pid = world.addParticle(px, py, pz, i <= 1 ? 0.0 : 1.0, 0.028, 1.15);
+      idx.push(pid);
+      if (i > 0) edges.push(world.addDist(idx[i-1], pid, 2000, 0.0, true));
+      if (i > 1) world.addBend(idx[i-2], pid, 55.0);
+      if (i >= 2) world.addPosture(pid, 18.0 * (1.2 - u * 0.7));
+    }
+    for (let i = 2; i < segs; i++) {
+      const u = i / segs;
+      const pinnaLen = Math.sin(u * Math.PI) * 0.34 + 0.08;
+      for (const side of [-1, 1]) {
+        world.leaves.push({
+          pIdx: idx[i], nextIdx: idx[i+1], side, angleOff: 0.0, pitch: 0.25,
+          length: pinnaLen, width: pinnaLen * 0.26, arch: 0.28,
+          colBase: [0.09, 0.42, 0.14], colTip: [0.34, 0.76, 0.22], mat: [0.32, 0.78, 0.0]
+        });
+      }
+    }
+    world.tubes.push({
+      indices: idx, edgeIds: edges, rStart: 0.024, rEnd: 0.005, sides: 5,
+      colStart: [0.14, 0.34, 0.12], colEnd: [0.26, 0.58, 0.18], mat: [0.48, 0.25, 0.0]
+    });
+  }
+}
+
+function addReedCluster(world, ox, oy, oz, reedCount = 18) {
+  world.staticProps.push({ pos: [ox, oy - 0.04, oz], scale: [0.75, 0.09, 0.65], col: [0.16, 0.17, 0.12], mat: [0.9, 0.0, 0.0] });
+  for (let r = 0; r < reedCount; r++) {
+    const a = hash3(r, 11, 2) * Math.PI * 2;
+    const dist = Math.sqrt(hash3(r, 3, 9)) * 0.68;
+    const rx = ox + Math.cos(a) * dist, rz = oz + Math.sin(a) * dist;
+    const h = 1.65 + hash3(r, 7, 13) * 1.15;
+    const leanX = (hash3(r, 4, 8) - 0.5) * 0.35;
+    const leanZ = (hash3(r, 5, 1) - 0.5) * 0.35;
+    const segs = 9;
+    const idx = [], edges = [];
+    for (let i = 0; i <= segs; i++) {
+      const u = i / segs;
+      const pid = world.addParticle(rx + leanX * u * u, oy + u * h, rz + leanZ * u * u, i <= 1 ? 0.0 : 1.0, 0.022, 1.3);
+      idx.push(pid);
+      if (i > 0) edges.push(world.addDist(idx[i-1], pid, 2200, 0.0, true));
+      if (i > 1) world.addBend(idx[i-2], pid, 48.0 * (1.2 - u * 0.6));
+      if (i >= 2) world.addPosture(pid, 24.0 * (1.15 - u * 0.72));
+    }
+    world.tubes.push({
+      indices: idx, edgeIds: edges, rStart: 0.024, rEnd: 0.008, sides: 5,
+      colStart: [0.14, 0.36, 0.11], colEnd: [0.42, 0.64, 0.18], mat: [0.42, 0.45, 0.0]
+    });
+    // Cattail seed head on tall stalks
+    if (r % 2 === 0) {
+      world.beads.push({
+        pIdx: idx[segs - 1], rx: 0.044, ry: 0.14, rz: 0.044, offset: [0, -0.05, 0],
+        col: [0.27, 0.15, 0.08], mat: [0.85, 0.05, 0.0], rings: 6, segs: 8
+      });
+    } else {
+      // Long grass leaf blade
+      world.leaves.push({
+        pIdx: idx[3], nextIdx: idx[4], side: 1, angleOff: a, pitch: 0.65,
+        length: 0.75, width: 0.055, arch: 0.55,
+        colBase: [0.16, 0.44, 0.13], colTip: [0.48, 0.72, 0.22], mat: [0.38, 0.62, 0.0]
+      });
+    }
+  }
+}
+
+const SCENES = [
+  {
+    id: "botanical",
+    name: "Botanical Strands & Web",
+    tag: "4 Systems",
+    desc: "Fern fronds, cattail reeds, hanging jungle vines & dew-beaded orb spiderweb.",
+    defaults: { gravity: -9.8, wind: 2.0, turb: 1.2, stretch: 1400, bend: 0.52, tearRatio: 2.2 },
+    camera: { yaw: -0.45, pitch: 0.24, dist: 6.4, target: [0, 0.1, 0] },
+    build(w) {
+      w.groundY = -1.75;
+      w.collider.pos = [0.2, 0.25, 0.55];
+      w.collider.radius = 0.45;
+      addOrbSpiderweb(w, 0.15, 0.45, 0.85, 1.15, 12, 6);
+      addFernCluster(w, -1.65, -1.72, 0.25, 8);
+      addReedCluster(w, 1.75, -1.72, -0.35, 14);
+      for (let i = 0; i < 6; i++) {
+        addHangingVine(w, -1.4 + i * 0.56, 2.25, -0.95 + (i % 2) * 0.35, 10, 2.2 + (i % 3) * 0.35, 1);
+      }
+    }
+  },
+  {
+    id: "spiderweb",
+    name: "Orb-Weave Spiderweb",
+    tag: "Tearable Silk",
+    desc: "Tensioned silk spokes, capture spiral & glowing morning dewdrops. Grab to stretch & snap!",
+    defaults: { gravity: -2.2, wind: 1.6, turb: 1.1, stretch: 1500, bend: 0.1, tearRatio: 1.9 },
+    camera: { yaw: -0.25, pitch: 0.16, dist: 4.5, target: [0, 0.2, 0] },
+    build(w) {
+      w.groundY = -1.9;
+      w.collider.pos = [0.0, 0.25, 0.85];
+      w.collider.radius = 0.38;
+      addOrbSpiderweb(w, 0.0, 0.3, 0.0, 1.72, 16, 8);
+    }
+  },
+  {
+    id: "cables",
+    name: "Cables & Heavy Chains",
+    tag: "Rigging",
+    desc: "Dual-anchored catenary utility cables with markers + interlocking 3D steel chains.",
+    defaults: { gravity: -10.8, wind: 2.2, turb: 1.0, stretch: 2200, bend: 0.25, tearRatio: 2.6 },
+    camera: { yaw: -0.38, pitch: 0.20, dist: 6.2, target: [0, 0.2, 0] },
+    build(w) {
+      w.groundY = -1.8;
+      w.collider.pos = [0.0, -0.25, 0.1];
+      w.collider.radius = 0.52;
+      // Left & right support pylons
+      for (const sx of [-2.4, 2.4]) {
+        for (let k = 0; k < 5; k++) {
+          w.staticProps.push({ pos: [sx, -1.6 + k * 0.82, 0], scale: [0.08, 0.44, 0.08], col: [0.25, 0.28, 0.33], mat: [0.45, 0.0, 0.72] });
+        }
+      }
+      // 4 Suspended catenary power cables
+      const cableOffsets = [
+        { y: 1.65, z: -0.45, r: 0.032, col: [0.16, 0.18, 0.22], sag: 0.42 },
+        { y: 1.35, z: 0.0,   r: 0.038, col: [0.22, 0.24, 0.28], sag: 0.55 },
+        { y: 1.65, z: 0.45,  r: 0.032, col: [0.16, 0.18, 0.22], sag: 0.42 },
+        { y: 0.85, z: 0.25,  r: 0.026, col: [0.78, 0.46, 0.12], sag: 0.65 },
+      ];
+      for (const cb of cableOffsets) {
+        const segs = 20, idx = [], edges = [];
+        for (let i = 0; i <= segs; i++) {
+          const u = i / segs;
+          const px = -2.4 + u * 4.8;
+          const py = cb.y - Math.sin(u * Math.PI) * cb.sag;
+          const pid = w.addParticle(px, py, cb.z, (i === 0 || i === segs) ? 0.0 : 1.0, cb.r * 1.4, 0.85);
+          idx.push(pid);
+          if (i > 0) edges.push(w.addDist(idx[i-1], pid, 2400, 2.5, true, 1.015));
+          if (i > 1) w.addBend(idx[i-2], pid, 16.0);
+          if (i === 6 || i === 14) {
+            w.beads.push({ pIdx: pid, rx: 0.095, ry: 0.095, rz: 0.095, offset: [0,0,0],
+              col: [0.95, 0.52, 0.08], mat: [0.28, 0.1, 0.05], rings: 7, segs: 12 });
+          }
+        }
+        w.tubes.push({
+          indices: idx, edgeIds: edges, rStart: cb.r, rEnd: cb.r, sides: 7,
+          colStart: cb.col, colEnd: cb.col, mat: [0.35, 0.02, 0.25]
+        });
+      }
+      // 3 Interlocking 3D Steel Chains hanging freely & catenary!
+      for (let c = 0; c < 3; c++) {
+        const segs = 14, idx = [], edges = [];
+        const zOff = -0.35 + c * 0.35;
+        for (let i = 0; i <= segs; i++) {
+          const u = i / segs;
+          const isCat = (c === 1);
+          const px = isCat ? (-2.4 + u * 4.8) : (-1.1 + c * 1.1);
+          const py = isCat ? (0.45 - Math.sin(u * Math.PI) * 0.85) : (1.55 - u * 2.55);
+          const pin = isCat ? (i === 0 || i === segs) : (i === 0);
+          const pid = w.addParticle(px, py, zOff, pin ? 0.0 : 0.45, 0.07, 0.5);
+          idx.push(pid);
+          if (i > 0) edges.push(w.addDist(idx[i-1], pid, 3200, 0.0, true, 1.0));
+        }
+        w.chains.push({
+          indices: idx, edgeIds: edges, linkR: 0.068, tubeR: 0.022,
+          col: [0.68, 0.72, 0.78], mat: [0.24, 0.0, 0.92]
+        });
+      }
+    }
+  },
+  {
+    id: "vines",
+    name: "Jungle Vines & Woodland Fern",
+    tag: "Botanical",
+    desc: "Subsurface-lit 3D leaf blades & fern pinnae rigidly skinned onto flexing XPBD stems.",
+    defaults: { gravity: -9.2, wind: 2.3, turb: 1.5, stretch: 1500, bend: 0.58, tearRatio: 2.8 },
+    camera: { yaw: -0.5, pitch: 0.22, dist: 5.8, target: [0, 0.0, 0] },
+    build(w) {
+      w.groundY = -1.75;
+      w.collider.pos = [0.0, 0.2, 0.2];
+      w.collider.radius = 0.48;
+      addFernCluster(w, -0.75, -1.72, 0.25, 11);
+      addFernCluster(w, 1.25, -1.72, -0.45, 8);
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        addHangingVine(w, Math.cos(a)*1.45, 2.25, Math.sin(a)*0.85 - 0.3, 11, 2.1 + hash3(i,2,5)*0.95, 1);
+      }
+    }
+  },
+  {
+    id: "reeds",
+    name: "Tall Lakeside Reeds",
+    tag: "Wind Waves",
+    desc: "Root-pinned flexible stalks with sword blades & cattail heads rippling in gusts.",
+    defaults: { gravity: -5.0, wind: 2.8, turb: 1.8, stretch: 2200, bend: 0.68, tearRatio: 0.0 },
+    camera: { yaw: -0.55, pitch: 0.22, dist: 5.5, target: [0, -0.1, 0] },
+    build(w) {
+      w.groundY = -1.75;
+      w.collider.pos = [-0.1, -0.45, 0.2];
+      w.collider.radius = 0.46;
+      addReedCluster(w, -0.65, -1.72, 0.2, 16);
+      addReedCluster(w, 0.75, -1.72, -0.25, 16);
+    }
+  },
+  {
+    id: "kelp",
+    name: "Abyssal Kelp & Anemone",
+    tag: "Underwater",
+    desc: "Buoyant giant kelp stipes, golden gas bladders & bioluminescent anemone tentacles.",
+    defaults: { gravity: 4.6, wind: 2.1, turb: 1.6, stretch: 1400, bend: 0.36, tearRatio: 0.0 },
+    camera: { yaw: -0.48, pitch: 0.18, dist: 5.8, target: [0, 0.0, 0] },
+    build(w) {
+      w.underwater = true;
+      w.groundY = -1.75;
+      w.collider.pos = [0.15, 0.1, 0.35];
+      w.collider.radius = 0.48;
+      // Giant Kelp Forest (buoyant stipes rising upward!)
+      for (let k = 0; k < 10; k++) {
+        const kx = -1.85 + (k % 5) * 0.55 + (hash3(k,1,2)-0.5)*0.25;
+        const kz = -0.55 + Math.floor(k / 5) * 0.85 + (hash3(k,3,4)-0.5)*0.25;
+        const h = 2.4 + hash3(k,5,6) * 1.1;
+        const segs = 12, idx = [], edges = [];
+        for (let i = 0; i <= segs; i++) {
+          const u = i / segs;
+          const pid = w.addParticle(kx, -1.72 + u * h, kz, i === 0 ? 0.0 : 1.0, 0.032, 1.4);
+          idx.push(pid);
+          if (i > 0) edges.push(w.addDist(idx[i-1], pid, 1500, 0.0, true));
+          if (i > 1) w.addBend(idx[i-2], pid, 14.0);
+        }
+        for (let i = 2; i < segs; i++) {
+          // Golden pneumatocyst gas bladder + ruffled translucent emerald kelp blade!
+          w.beads.push({ pIdx: idx[i], rx: 0.036, ry: 0.044, rz: 0.036, offset: [0.025, 0, 0],
+            col: [0.85, 0.68, 0.18], mat: [0.22, 0.45, 0.05], rings: 5, segs: 8 });
+          w.leaves.push({
+            pIdx: idx[i], nextIdx: idx[i+1], side: (i & 1) ? 1 : -1, angleOff: i * 1.2 + k, pitch: 0.35,
+            length: 0.55, width: 0.12, arch: 0.22, kelp: true,
+            colBase: [0.04, 0.34, 0.22], colTip: [0.14, 0.68, 0.44], mat: [0.22, 0.85, 0.0]
+          });
+        }
+        w.tubes.push({
+          indices: idx, edgeIds: edges, rStart: 0.034, rEnd: 0.012, sides: 6,
+          colStart: [0.08, 0.30, 0.18], colEnd: [0.16, 0.54, 0.34], mat: [0.28, 0.35, 0.0]
+        });
+      }
+      // Bioluminescent Sea Anemone colony
+      const ax = 1.25, ay = -1.52, az = 0.25;
+      w.staticProps.push({ pos: [ax, ay - 0.12, az], scale: [0.58, 0.28, 0.55], col: [0.24, 0.12, 0.34], mat: [0.65, 0.15, 0.0] });
+      for (let t = 0; t < 24; t++) {
+        const ring = (t < 8) ? 0.18 : 0.40;
+        const a = (t / (t < 8 ? 8 : 16)) * Math.PI * 2 + (t < 8 ? 0.2 : 0);
+        const bx = ax + Math.cos(a) * ring, bz = az + Math.sin(a) * ring;
+        const len = 0.95 + hash3(t, 8, 9) * 0.45;
+        const segs = 7, idx = [], edges = [];
+        for (let i = 0; i <= segs; i++) {
+          const u = i / segs;
+          const pid = w.addParticle(bx + Math.cos(a)*u*0.35, ay + u * len, bz + Math.sin(a)*u*0.35,
+            i === 0 ? 0.0 : 1.0, 0.028, 1.5);
+          idx.push(pid);
+          if (i > 0) edges.push(w.addDist(idx[i-1], pid, 1200, 0.0, true));
+          if (i > 1) w.addBend(idx[i-2], pid, 22.0);
+          if (i >= 2) w.addPosture(pid, 10.0 * (1.1 - u * 0.6));
+        }
+        w.tubes.push({
+          indices: idx, edgeIds: edges, rStart: 0.042, rEnd: 0.015, sides: 6,
+          colStart: [0.42, 0.14, 0.68], colEnd: [0.96, 0.35, 0.78], mat: [0.22, 1.45, 0.0]
+        });
+        // Glowing bioluminescent cyan tip bulb
+        w.beads.push({ pIdx: idx[segs], rx: 0.038, ry: 0.038, rz: 0.038, offset: [0,0,0],
+          col: [0.24, 0.88, 1.0], mat: [0.12, 2.35, 0.0], rings: 5, segs: 8 });
+      }
+    }
+  },
+  {
+    id: "cloth",
+    name: "Orthotropic XPBD Banner",
+    tag: "Woven Cloth",
+    desc: "2D warp/weft/shear/bend XPBD particle fabric skinned as a smooth backlit 3D cloth mesh.",
+    defaults: { gravity: -9.8, wind: 3.4, turb: 1.8, stretch: 1800, bend: 0.38, tearRatio: 2.2 },
+    camera: { yaw: -0.45, pitch: 0.18, dist: 5.4, target: [0, 0.15, 0] },
+    build(w) {
+      w.groundY = -1.85;
+      w.collider.pos = [0.1, -0.05, 0.65];
+      w.collider.radius = 0.45;
+      const cols = 19, rows = 15, W = 2.6, H = 2.0;
+      const startIdx = w.n;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const u = c / (cols - 1), v = r / (rows - 1);
+          const pin = (r === 0 && (c === 0 || c === 4 || c === 9 || c === 14 || c === cols - 1));
+          w.addParticle(-W*0.5 + u*W, 1.45 - v*H, Math.sin(u*Math.PI)*0.04, pin ? 0.0 : 1.0, 0.03, 1.35);
+        }
+      }
+      // Top hanging crossbar hardware
+      for (let k = 0; k <= 8; k++) {
+        w.staticProps.push({ pos: [-1.4 + k*0.35, 1.48, 0], scale: [0.20, 0.035, 0.035], col: [0.55, 0.58, 0.65], mat: [0.25, 0.0, 0.85] });
+      }
+      const edgeH = new Int32Array(rows * (cols - 1)).fill(-1);
+      const edgeV = new Int32Array((rows - 1) * cols).fill(-1);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const i = startIdx + r*cols + c;
+          if (c < cols - 1) edgeH[r*(cols-1)+c] = w.addDist(i, i + 1, 1800, 2.2, true);      // Warp
+          if (r < rows - 1) edgeV[r*cols+c]     = w.addDist(i, i + cols, 1800, 2.2, true);   // Weft
+          if (c < cols - 1 && r < rows - 1) {
+            w.addDist(i, i + cols + 1, 650, 2.4, false);                                      // Shear A
+            w.addDist(i + 1, i + cols, 650, 2.4, false);                                      // Shear B
+          }
+          if (c < cols - 2) w.addBend(i, i + 2, 22.0);                                        // Warp Bend
+          if (r < rows - 2) w.addBend(i, i + cols*2, 22.0);                                   // Weft Bend
+        }
+      }
+      w.clothGrids.push({
+        cols, rows, startIdx, edgeGrid: { h: edgeH, v: edgeV },
+        colA: [0.76, 0.16, 0.22], colB: [0.95, 0.58, 0.20], mat: [0.68, 0.48, 0.0]
+      });
+    }
+  }
+];
+
+// =================================================================================================
+// 6. STATE, UI BINDINGS & INTERACTIVE RAYCASTING (Orbit / Grab & Pluck / Move Collider / Snip)
+// =================================================================================================
+const world = new XpbdWorld();
+const meshBuilder = new DynamicMeshBuilder();
+
+const cfg = {
+  substeps: 5,
+  stretch: 1200,
+  bend: 0.45,
+  damping: 0.992,
+  gravity: -9.8,
+  tearRatio: 2.4,
+  wind: 1.8,
+  turb: 1.1,
+  showMesh: true,
+  showParticles: false,
+  showConstraints: false,
+  showCollider: true,
+  tool: "orbit"
+};
+
+const cam = { yaw: -0.45, pitch: 0.24, dist: 6.4, target: [0, 0.1, 0], eye: [0, 1, 6], vp: new Float32Array(16), invVp: new Float32Array(16) };
+let activeScene = SCENES[0];
+let windPulse = 0.0;
+let simTime = 0.0;
+
+// Populate scene list
+const sceneListEl = document.getElementById("sceneList");
+SCENES.forEach(sc => {
+  const b = document.createElement("button");
+  b.className = "scene-btn";
+  b.dataset.id = sc.id;
+  b.innerHTML = `<div class="stitle"><span>${sc.name}</span><span class="stag">${sc.tag}</span></div><div class="sdesc">${sc.desc}</div>`;
+  b.onclick = () => loadScene(sc);
+  sceneListEl.appendChild(b);
+});
+
+function syncSlidersFromCfg() {
+  const bind = (sId, vId, val, fmt) => {
+    document.getElementById(sId).value = val;
+    document.getElementById(vId).textContent = fmt(val);
+  };
+  bind("sSubsteps", "vSubsteps", cfg.substeps, v => `${v}`);
+  bind("sStretch", "vStretch", cfg.stretch, v => `${v}`);
+  bind("sBend", "vBend", cfg.bend, v => Number(v).toFixed(2));
+  bind("sDamping", "vDamping", cfg.damping, v => Number(v).toFixed(3));
+  bind("sGravity", "vGravity", cfg.gravity, v => Number(v).toFixed(1));
+  bind("sTear", "vTear", cfg.tearRatio, v => v <= 0.01 ? "Off" : `${Number(v).toFixed(1)}x`);
+  bind("sWind", "vWind", cfg.wind, v => Number(v).toFixed(1));
+  bind("sTurb", "vTurb", cfg.turb, v => Number(v).toFixed(1));
+}
+
+function loadScene(sc) {
+  activeScene = sc;
+  Object.assign(cfg, sc.defaults);
+  syncSlidersFromCfg();
+  cam.yaw = sc.camera.yaw; cam.pitch = sc.camera.pitch; cam.dist = sc.camera.dist;
+  cam.target = [...sc.camera.target];
+  world.beginBuild();
+  sc.build(world);
+  world.collider.enabled = cfg.showCollider;
+  world.finalize();
+  simTime = 0.0;
+  windPulse = 0.0;
+  document.getElementById("hudTitle").textContent = sc.name + " · XPBD Particle-Driven Mesh";
+  document.querySelectorAll(".scene-btn").forEach(b => b.classList.toggle("active", b.dataset.id === sc.id));
+}
+
+// Slider & checkbox listeners
+function hookRange(id, valId, key, parse, fmt) {
+  const el = document.getElementById(id);
+  el.oninput = () => {
+    cfg[key] = parse(el.value);
+    document.getElementById(valId).textContent = fmt(cfg[key]);
+  };
+}
+hookRange("sSubsteps", "vSubsteps", "substeps", Number, v => `${v}`);
+hookRange("sStretch", "vStretch", "stretch", Number, v => `${v}`);
+hookRange("sBend", "vBend", "bend", Number, v => v.toFixed(2));
+hookRange("sDamping", "vDamping", "damping", Number, v => v.toFixed(3));
+hookRange("sGravity", "vGravity", "gravity", Number, v => v.toFixed(1));
+hookRange("sTear", "vTear", "tearRatio", Number, v => v <= 0.01 ? "Off" : `${v.toFixed(1)}x`);
+hookRange("sWind", "vWind", "wind", Number, v => v.toFixed(1));
+hookRange("sTurb", "vTurb", "turb", Number, v => v.toFixed(1));
+
+document.getElementById("cMesh").onchange = e => cfg.showMesh = e.target.checked;
+document.getElementById("cParticles").onchange = e => cfg.showParticles = e.target.checked;
+document.getElementById("cConstraints").onchange = e => cfg.showConstraints = e.target.checked;
+document.getElementById("cCollider").onchange = e => { cfg.showCollider = e.target.checked; world.collider.enabled = e.target.checked; };
+document.getElementById("btnGust").onclick = () => { windPulse = 8.5; };
+document.getElementById("btnReset").onclick = () => loadScene(activeScene);
+
+document.querySelectorAll("[data-tool]").forEach(b => {
+  b.onclick = () => {
+    cfg.tool = b.dataset.tool;
+    document.querySelectorAll("[data-tool]").forEach(x => x.classList.toggle("active", x === b));
+  };
+});
+
+// Ray helpers for grabbing XPBD particles, moving collider sphere, and snipping constraints
+function screenRay(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const ndcX = ((clientX - rect.left) / rect.width) * 2 - 1;
+  const ndcY = 1 - ((clientY - rect.top) / rect.height) * 2;
+  const unproj = (z) => {
+    const m = cam.invVp;
+    const x = m[0]*ndcX + m[4]*ndcY + m[8]*z + m[12];
+    const y = m[1]*ndcX + m[5]*ndcY + m[9]*z + m[13];
+    const zz = m[2]*ndcX + m[6]*ndcY + m[10]*z + m[14];
+    const w = m[3]*ndcX + m[7]*ndcY + m[11]*z + m[15];
+    return [x/w, y/w, zz/w];
+  };
+  const p0 = unproj(-1), p1 = unproj(1);
+  let dx = p1[0]-p0[0], dy = p1[1]-p0[1], dz = p1[2]-p0[2];
+  const l = Math.hypot(dx, dy, dz) || 1;
+  return { o: p0, d: [dx/l, dy/l, dz/l] };
+}
+
+function pointRayDist(p, ray) {
+  const vx = p[0]-ray.o[0], vy = p[1]-ray.o[1], vz = p[2]-ray.o[2];
+  const t = Math.max(0, vx*ray.d[0] + vy*ray.d[1] + vz*ray.d[2]);
+  const qx = ray.o[0]+ray.d[0]*t - p[0], qy = ray.o[1]+ray.d[1]*t - p[1], qz = ray.o[2]+ray.d[2]*t - p[2];
+  return { dist: Math.hypot(qx, qy, qz), t };
+}
+
+let pointerMode = null, lastX = 0, lastY = 0, dragPlaneDist = 5.0;
+
+canvas.addEventListener("contextmenu", e => e.preventDefault());
+canvas.addEventListener("pointerdown", e => {
+  canvas.setPointerCapture(e.pointerId);
+  lastX = e.clientX; lastY = e.clientY;
+  const effectiveTool = (e.button === 2 || e.shiftKey) ? "grab" : cfg.tool;
+
+  if (effectiveTool === "orbit") {
+    pointerMode = "orbit";
+  } else if (effectiveTool === "grab") {
+    const ray = screenRay(e.clientX, e.clientY);
+    let best = -1, bestD = 0.35, bestT = 5.0;
+    for (let i = 0; i < world.n; i++) {
+      if (world.invMass[i] <= 0) continue;
+      const r = pointRayDist([world.pos[i*3], world.pos[i*3+1], world.pos[i*3+2]], ray);
+      if (r.dist < bestD) { bestD = r.dist; best = i; bestT = r.t; }
+    }
+    if (best >= 0) {
+      pointerMode = "grab";
+      world.grabIdx = best;
+      dragPlaneDist = bestT;
+      world.grabTarget = [ray.o[0]+ray.d[0]*bestT, ray.o[1]+ray.d[1]*bestT, ray.o[2]+ray.d[2]*bestT];
+    } else {
+      pointerMode = "orbit";
+    }
+  } else if (effectiveTool === "collider") {
+    const ray = screenRay(e.clientX, e.clientY);
+    const r = pointRayDist(world.collider.pos, ray);
+    dragPlaneDist = r.t;
+    pointerMode = "collider";
+  } else if (effectiveTool === "cut") {
+    pointerMode = "cut";
+    snipAt(e.clientX, e.clientY);
+  }
+});
+
+function snipAt(cx, cy) {
+  const ray = screenRay(cx, cy);
+  for (const c of world.distCons) {
+    if (c.broken) continue;
+    const a3 = c.a*3, b3 = c.b*3;
+    const mid = [0.5*(world.pos[a3]+world.pos[b3]), 0.5*(world.pos[a3+1]+world.pos[b3+1]), 0.5*(world.pos[a3+2]+world.pos[b3+2])];
+    if (pointRayDist(mid, ray).dist < 0.22) {
+      c.broken = true;
+      world.tornCount++;
+    }
+  }
+}
+
+canvas.addEventListener("pointermove", e => {
+  if (!pointerMode) return;
+  const dx = e.clientX - lastX, dy = e.clientY - lastY;
+  lastX = e.clientX; lastY = e.clientY;
+  if (pointerMode === "orbit") {
+    cam.yaw -= dx * 0.007;
+    cam.pitch = Math.max(-1.1, Math.min(1.25, cam.pitch + dy * 0.006));
+  } else if (pointerMode === "grab" && world.grabIdx >= 0) {
+    const ray = screenRay(e.clientX, e.clientY);
+    world.grabTarget = [ray.o[0]+ray.d[0]*dragPlaneDist, ray.o[1]+ray.d[1]*dragPlaneDist, ray.o[2]+ray.d[2]*dragPlaneDist];
+  } else if (pointerMode === "collider") {
+    const ray = screenRay(e.clientX, e.clientY);
+    world.collider.pos = [ray.o[0]+ray.d[0]*dragPlaneDist, ray.o[1]+ray.d[1]*dragPlaneDist, ray.o[2]+ray.d[2]*dragPlaneDist];
+  } else if (pointerMode === "cut") {
+    snipAt(e.clientX, e.clientY);
+  }
+});
+
+canvas.addEventListener("pointerup", () => {
+  pointerMode = null;
+  world.grabIdx = -1;
+});
+canvas.addEventListener("wheel", e => {
+  e.preventDefault();
+  cam.dist = Math.max(2.2, Math.min(14.0, cam.dist * (1 + e.deltaY * 0.001)));
+}, { passive: false });
+
+// =================================================================================================
+// 7. WEBGL2 BUFFERS & MAIN RENDER LOOP
+// =================================================================================================
+const meshVao = gl.createVertexArray();
+const meshVbo = gl.createBuffer();
+gl.bindVertexArray(meshVao);
+gl.bindBuffer(gl.ARRAY_BUFFER, meshVbo);
+const STRIDE = 12 * 4;
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, STRIDE, 0);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, STRIDE, 12);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, STRIDE, 24);
+gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 3, gl.FLOAT, false, STRIDE, 36);
+
+const lineVao = gl.createVertexArray();
+const lineVbo = gl.createBuffer();
+gl.bindVertexArray(lineVao);
+gl.bindBuffer(gl.ARRAY_BUFFER, lineVbo);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 28, 12);
+
+// Floor reference grid lines
+const gridVerts = [];
+for (let i = -5; i <= 5; i++) {
+  const c = (i === 0) ? [0.32, 0.42, 0.58, 0.35] : [0.22, 0.28, 0.38, 0.18];
+  gridVerts.push(i, -1.78, -5, ...c, i, -1.78, 5, ...c);
+  gridVerts.push(-5, -1.78, i, ...c, 5, -1.78, i, ...c);
+}
+const gridData = new Float32Array(gridVerts);
+
+const bgVao = gl.createVertexArray();
+
+const uMeshVP = gl.getUniformLocation(meshProgram, "uViewProj");
+const uMeshCam = gl.getUniformLocation(meshProgram, "uCamPos");
+const uMeshSun = gl.getUniformLocation(meshProgram, "uSunDir");
+const uMeshTop = gl.getUniformLocation(meshProgram, "uSkyTop");
+const uMeshBot = gl.getUniformLocation(meshProgram, "uSkyBot");
+const uMeshUW  = gl.getUniformLocation(meshProgram, "uUnderwater");
+
+const uLineVP = gl.getUniformLocation(lineProgram, "uViewProj");
+const uLinePS = gl.getUniformLocation(lineProgram, "uPointSize");
+const uLineRP = gl.getUniformLocation(lineProgram, "uRoundPoint");
+const uBgTop  = gl.getUniformLocation(bgProgram, "uTop");
+const uBgBot  = gl.getUniformLocation(bgProgram, "uBot");
+
+let lineScratch = new Float32Array(7 * 30000);
+function ensureLineScratch(verts) {
+  if (verts * 7 > lineScratch.length) lineScratch = new Float32Array(verts * 7 * 2);
+}
+
+loadScene(SCENES[0]);
+
+let lastTime = performance.now(), fpsAcc = 0, fpsFrames = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.033, Math.max(0.001, (now - lastTime) * 0.001));
+  lastTime = now;
+  fpsAcc += dt; fpsFrames++;
+  if (fpsAcc >= 0.35) {
+    document.getElementById("hFps").textContent = Math.round(fpsFrames / fpsAcc);
+    fpsAcc = 0; fpsFrames = 0;
+  }
+
+  // Resize canvas crisply
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const cw = Math.max(1, Math.floor(canvas.clientWidth * dpr));
+  const ch = Math.max(1, Math.floor(canvas.clientHeight * dpr));
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+  gl.viewport(0, 0, cw, ch);
+
+  // Step XPBD particle solver
+  simTime += dt;
+  windPulse *= Math.exp(-dt * 2.2);
+  world.step(dt, cfg, simTime, windPulse);
+
+  // Update camera matrices
+  const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+  cam.eye = [
+    cam.target[0] + cam.dist * cp * Math.sin(cam.yaw),
+    cam.target[1] + cam.dist * sp,
+    cam.target[2] + cam.dist * cp * Math.cos(cam.yaw)
+  ];
+  const proj = mat4Perspective(42 * Math.PI / 180, cw / ch, 0.08, 120.0);
+  const view = mat4LookAt(cam.eye, cam.target, [0, 1, 0]);
+  cam.vp = mat4Mul(proj, view);
+  cam.invVp = mat4Invert(cam.vp);
+
+  // 1. Background gradient
+  gl.disable(gl.DEPTH_TEST);
+  gl.useProgram(bgProgram);
+  gl.bindVertexArray(bgVao);
+  if (world.underwater) {
+    gl.uniform3f(uBgTop, 0.05, 0.21, 0.30);
+    gl.uniform3f(uBgBot, 0.015, 0.055, 0.095);
+  } else {
+    gl.uniform3f(uBgTop, 0.13, 0.16, 0.22);
+    gl.uniform3f(uBgBot, 0.055, 0.065, 0.088);
+  }
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  gl.enable(gl.DEPTH_TEST);
+  gl.clear(gl.DEPTH_BUFFER_BIT);
+  gl.disable(gl.CULL_FACE);
+
+  // 2. Floor grid
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.useProgram(lineProgram);
+  gl.uniformMatrix4fv(uLineVP, false, cam.vp);
+  gl.uniform1f(uLinePS, 1.0);
+  gl.uniform1f(uLineRP, 0.0);
+  gl.bindVertexArray(lineVao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, lineVbo);
+  gl.bufferData(gl.ARRAY_BUFFER, gridData, gl.STATIC_DRAW);
+  gl.drawArrays(gl.LINES, 0, gridData.length / 7);
+  gl.disable(gl.BLEND);
+
+  // 3. Skin & Draw 3D Lit Procedural Meshes driven by live XPBD particles!
+  if (cfg.showMesh) {
+    meshBuilder.buildFromWorld(world, simTime, cfg.showCollider);
+    gl.useProgram(meshProgram);
+    gl.uniformMatrix4fv(uMeshVP, false, cam.vp);
+    gl.uniform3fv(uMeshCam, cam.eye);
+    gl.uniform3f(uMeshSun, 0.58, 0.86, 0.48);
+    if (world.underwater) {
+      gl.uniform3f(uMeshTop, 0.25, 0.65, 0.80);
+      gl.uniform3f(uMeshBot, 0.04, 0.14, 0.20);
+      gl.uniform1f(uMeshUW, 1.0);
+    } else {
+      gl.uniform3f(uMeshTop, 0.58, 0.68, 0.85);
+      gl.uniform3f(uMeshBot, 0.18, 0.20, 0.24);
+      gl.uniform1f(uMeshUW, 0.0);
+    }
+    gl.bindVertexArray(meshVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, meshVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, meshBuilder.vBuf.subarray(0, meshBuilder.vCount * 12), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, meshBuilder.vCount);
+  } else {
+    meshBuilder.clear();
+  }
+
+  // 4. Debug Overlay: XPBD Constraints color-coded by live tension!
+  if (cfg.showConstraints) {
+    const dc = world.distCons;
+    ensureLineScratch(dc.length * 2);
+    let o = 0;
+    for (let i = 0; i < dc.length; i++) {
+      const c = dc[i];
+      if (c.broken) continue;
+      const a3 = c.a*3, b3 = c.b*3;
+      const t = Math.min(1.0, c.strain * 3.5);
+      const r = 0.20 + t * 0.80, g = 0.85 - t * 0.65, b = 0.45 * (1 - t);
+      const al = c.isStructural ? 0.92 : 0.38;
+      lineScratch[o++]=world.pos[a3]; lineScratch[o++]=world.pos[a3+1]; lineScratch[o++]=world.pos[a3+2];
+      lineScratch[o++]=r; lineScratch[o++]=g; lineScratch[o++]=b; lineScratch[o++]=al;
+      lineScratch[o++]=world.pos[b3]; lineScratch[o++]=world.pos[b3+1]; lineScratch[o++]=world.pos[b3+2];
+      lineScratch[o++]=r; lineScratch[o++]=g; lineScratch[o++]=b; lineScratch[o++]=al;
+    }
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(lineProgram);
+    gl.uniformMatrix4fv(uLineVP, false, cam.vp);
+    gl.uniform1f(uLineRP, 0.0);
+    gl.bindVertexArray(lineVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, lineScratch.subarray(0, o), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.LINES, 0, o / 7);
+    gl.disable(gl.BLEND);
+  }
+
+  // 5. Debug Overlay: XPBD Particle Skeleton (cyan = free, red = pinned anchor, yellow = grabbed)
+  if (cfg.showParticles) {
+    ensureLineScratch(world.n);
+    let o = 0;
+    for (let i = 0; i < world.n; i++) {
+      const i3 = i * 3;
+      const isPin = world.invMass[i] <= 0;
+      const isGrab = (i === world.grabIdx);
+      lineScratch[o++]=world.pos[i3]; lineScratch[o++]=world.pos[i3+1]; lineScratch[o++]=world.pos[i3+2];
+      if (isGrab)      { lineScratch[o++]=1.0; lineScratch[o++]=0.88; lineScratch[o++]=0.2; lineScratch[o++]=1.0; }
+      else if (isPin)  { lineScratch[o++]=1.0; lineScratch[o++]=0.32; lineScratch[o++]=0.32; lineScratch[o++]=1.0; }
+      else             { lineScratch[o++]=0.32; lineScratch[o++]=0.88; lineScratch[o++]=1.0; lineScratch[o++]=0.95; }
+    }
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(lineProgram);
+    gl.uniformMatrix4fv(uLineVP, false, cam.vp);
+    gl.uniform1f(uLinePS, 6.5 * dpr);
+    gl.uniform1f(uLineRP, 1.0);
+    gl.bindVertexArray(lineVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, lineVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, lineScratch.subarray(0, o), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.POINTS, 0, world.n);
+    gl.disable(gl.BLEND);
+  }
+
+  // Update HUD stats
+  document.getElementById("hPts").textContent = world.n;
+  document.getElementById("hCons").textContent = world.distCons.length + world.bendCons.length;
+  document.getElementById("hTris").textContent = Math.floor(meshBuilder.vCount / 3);
+  document.getElementById("hTorn").textContent = world.tornCount;
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
