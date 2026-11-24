@@ -148,6 +148,30 @@
         </div>
         <label class="chk" style="margin-top:1px;"><input type="checkbox" id="cFemHeatmap"/> FEM 3D Strain Heatmap</label>
       </div>
+      <div id="vatPanel" style="display:flex;flex-direction:column;gap:7px;margin-top:6px;padding-top:7px;border-top:1px solid rgba(192,132,252,0.32);">
+        <div class="sec-title" style="color:#d8b4fe;">High-Poly Mesh &amp; GPU VAT</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;">
+          <button class="btn active" id="btnModeCage" style="padding:5px 4px;font-size:10px;">Live GPU Cage</button>
+          <button class="btn" id="btnModeVat" style="padding:5px 4px;font-size:10px;">Baked VAT</button>
+          <button class="btn" id="btnModeCoarse" style="padding:5px 4px;font-size:10px;">Coarse Cage</button>
+        </div>
+        <div class="tool-row">
+          <button class="btn warn" id="btnBakeVat" style="font-size:11px;">Bake 64f VAT</button>
+          <button class="btn" id="btnExportVat" style="font-size:11px;">Export VAT PNG</button>
+        </div>
+        <div id="vatPlaybackBox" style="display:none;flex-direction:column;gap:5px;">
+          <div class="slider-row">
+            <div class="slider-hdr"><span>VAT Frame (0-CPU GPU)</span><span class="val" id="vVatFrame">0 / 63</span></div>
+            <input type="range" id="sVatFrame" min="0" max="63" step="0.25" value="0"/>
+          </div>
+          <div class="tool-row">
+            <button class="btn active" id="btnVatPlay" style="font-size:11px;">Pause VAT</button>
+            <button class="btn" id="btnVatSpeed" style="font-size:11px;">Speed: 1.0x</button>
+          </div>
+          <canvas id="vatPreview" width="256" height="64" style="width:100%;height:58px;border-radius:6px;border:1px solid rgba(216,180,254,0.35);background:#070a12;image-rendering:pixelated;"></canvas>
+          <div id="vatInfo" style="font-size:10px;color:#cbd5e1;font-variant-numeric:tabular-nums;">RGBA32F VAT · Ready</div>
+        </div>
+      </div>
     </div>
 
     <div class="section">
@@ -413,6 +437,165 @@ void main() {
 `
 );
 
+// High-Poly Shared Tire Shader: GPU Tetrahedral Barycentric Cage (3D FEM) + Quad Cage (XPBD) + Baked RGBA32F VAT!
+const hpProgram = linkProgram(
+`#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2D;
+
+layout(location = 0) in vec3 aRestNrm;
+layout(location = 1) in vec3 aColor;
+layout(location = 2) in vec3 aMat;
+layout(location = 3) in vec4 aCageIdx;
+layout(location = 4) in vec4 aCageW;
+layout(location = 5) in vec4 aExtra;
+
+uniform mat4 uViewProj;
+uniform int uDeformMode;        // 0 = Live 3D FEM Tet Cage, 1 = Live XPBD Quad Cage, 2 = Baked RGBA32F VAT (0-CPU!)
+uniform sampler2D uNodeTex;     // RGBA32F (N x 1): xyz = live cage node pos, a = live 3D strain
+uniform sampler2D uTetNrmTex;   // RGBA32F (T x 3): 3 rows of Nanson cofactor matrix cof(F) per 3D tet
+uniform sampler2D uVatPosTex;   // RGBA32F (256 x rowsPerFrame*F): baked worldPos.xyz + strain.a
+uniform sampler2D uVatNrmTex;   // RGBA32F (256 x rowsPerFrame*F): baked worldNrm.xyz
+uniform int uVatRowsPerFrame;
+uniform int uVatFrame0;
+uniform int uVatFrame1;
+uniform float uVatFrac;
+
+out vec3 vWorldPos;
+out vec3 vNormal;
+out vec3 vColor;
+out vec3 vMat;
+out float vStrain;
+
+ivec2 vatCoord(int vIdx, int f) {
+  return ivec2(vIdx & 255, (vIdx >> 8) + f * uVatRowsPerFrame);
+}
+
+void main() {
+  vec3 worldPos;
+  vec3 worldNrm;
+  float strain = 0.0;
+
+  if (uDeformMode == 2) {
+    // 100% GPU BAKED VERTEX ANIMATION TEXTURE (0.00 ms CPU physics!)
+    int vId = gl_VertexID;
+    vec4 pA = texelFetch(uVatPosTex, vatCoord(vId, uVatFrame0), 0);
+    vec4 pB = texelFetch(uVatPosTex, vatCoord(vId, uVatFrame1), 0);
+    vec3 nA = texelFetch(uVatNrmTex, vatCoord(vId, uVatFrame0), 0).xyz;
+    vec3 nB = texelFetch(uVatNrmTex, vatCoord(vId, uVatFrame1), 0).xyz;
+    worldPos = mix(pA.xyz, pB.xyz, uVatFrac);
+    strain   = mix(pA.a,   pB.a,   uVatFrac);
+    vec3 nm  = mix(nA, nB, uVatFrac);
+    worldNrm = (length(nm) > 1e-5) ? normalize(nm) : vec3(0.0, 1.0, 0.0);
+  } else if (uDeformMode == 0) {
+    // LIVE 3D FEM TETRAHEDRAL BARYCENTRIC EMBEDDING + NANSON COFACTOR NORMAL TRANSFORM
+    ivec4 idx = ivec4(aCageIdx + 0.5);
+    vec4 p0 = texelFetch(uNodeTex, ivec2(idx.x, 0), 0);
+    vec4 p1 = texelFetch(uNodeTex, ivec2(idx.y, 0), 0);
+    vec4 p2 = texelFetch(uNodeTex, ivec2(idx.z, 0), 0);
+    vec4 p3 = texelFetch(uNodeTex, ivec2(idx.w, 0), 0);
+    worldPos = aCageW.x * p0.xyz + aCageW.y * p1.xyz + aCageW.z * p2.xyz + aCageW.w * p3.xyz;
+    strain   = max(0.0, aCageW.x * p0.a + aCageW.y * p1.a + aCageW.z * p2.a + aCageW.w * p3.a);
+    int tid = int(aExtra.x + 0.5);
+    vec3 c0 = texelFetch(uTetNrmTex, ivec2(tid, 0), 0).xyz;
+    vec3 c1 = texelFetch(uTetNrmTex, ivec2(tid, 1), 0).xyz;
+    vec3 c2 = texelFetch(uTetNrmTex, ivec2(tid, 2), 0).xyz;
+    vec3 tn = c0 * aRestNrm.x + c1 * aRestNrm.y + c2 * aRestNrm.z;
+    worldNrm = (length(tn) > 1e-5) ? normalize(tn) : aRestNrm;
+  } else {
+    // LIVE PNEUMATIC XPBD BILINEAR QUAD CAGE + NORMAL OFFSET EXTRUSION
+    ivec4 idx = ivec4(aCageIdx + 0.5);
+    vec4 q00 = texelFetch(uNodeTex, ivec2(idx.x, 0), 0);
+    vec4 q10 = texelFetch(uNodeTex, ivec2(idx.y, 0), 0);
+    vec4 q11 = texelFetch(uNodeTex, ivec2(idx.z, 0), 0);
+    vec4 q01 = texelFetch(uNodeTex, ivec2(idx.w, 0), 0);
+    vec3 baseP = aCageW.x * q00.xyz + aCageW.y * q10.xyz + aCageW.z * q11.xyz + aCageW.w * q01.xyz;
+    strain = max(0.0, aCageW.x * q00.a + aCageW.y * q10.a + aCageW.z * q11.a + aCageW.w * q01.a);
+    vec3 eU = 0.5 * ((q10.xyz - q00.xyz) + (q11.xyz - q01.xyz));
+    vec3 eV = 0.5 * ((q01.xyz - q00.xyz) + (q11.xyz - q10.xyz));
+    vec3 T = (length(eU) > 1e-6) ? normalize(eU) : vec3(1.0, 0.0, 0.0);
+    vec3 N = cross(eU, eV);
+    N = (length(N) > 1e-6) ? normalize(N) : vec3(0.0, 1.0, 0.0);
+    // Ensure N points outward (matching rest cage winding)
+    vec3 B = normalize(cross(N, T));
+    worldPos = baseP + N * aExtra.w;
+    vec3 tn = T * aExtra.x + B * aExtra.y + N * aExtra.z;
+    worldNrm = (length(tn) > 1e-5) ? normalize(tn) : N;
+  }
+
+  vWorldPos = worldPos;
+  vNormal = worldNrm;
+  vColor = aColor;
+  vMat = aMat;
+  vStrain = strain;
+  gl_Position = uViewProj * vec4(worldPos, 1.0);
+}
+`,
+`#version 300 es
+precision highp float;
+in vec3 vWorldPos;
+in vec3 vNormal;
+in vec3 vColor;
+in vec3 vMat;
+in float vStrain;
+
+uniform vec3 uCamPos;
+uniform vec3 uSunDir;
+uniform vec3 uSkyTop;
+uniform vec3 uSkyBot;
+uniform float uShowHeatmap;
+
+out vec4 fragColor;
+
+vec3 strainHeatmap(float s) {
+  float t = clamp(s * 0.42, 0.0, 1.0);
+  if (t < 0.25) return mix(vec3(0.08, 0.24, 0.62), vec3(0.08, 0.72, 0.80), t * 4.0);
+  if (t < 0.55) return mix(vec3(0.08, 0.72, 0.80), vec3(0.95, 0.82, 0.14), (t - 0.25) / 0.30);
+  return mix(vec3(0.95, 0.82, 0.14), vec3(0.96, 0.14, 0.10), (t - 0.55) / 0.45);
+}
+
+void main() {
+  vec3 N = normalize(vNormal);
+  if (!gl_FrontFacing) N = -N;
+  vec3 V = normalize(uCamPos - vWorldPos);
+  vec3 L = normalize(uSunDir);
+  vec3 H = normalize(L + V);
+
+  float rough = clamp(vMat.x, 0.08, 0.96);
+  float ao    = clamp(vMat.z, 0.25, 1.0);
+  vec3 baseCol = (uShowHeatmap > 0.5) ? mix(vColor * 0.45, strainHeatmap(vStrain), 0.88) * (0.65 + 0.35 * ao) : vColor * ao;
+
+  float hemi = N.y * 0.5 + 0.5;
+  vec3 ambient = mix(uSkyBot, uSkyTop, hemi) * 0.56;
+  float NdotL = max(dot(N, L), 0.0);
+  float fill = max(dot(N, normalize(vec3(-0.6, 0.35, -0.7))), 0.0) * 0.30;
+
+  float shininess = mix(96.0, 10.0, rough * rough);
+  float specPow = pow(max(dot(N, H), 0.0), shininess);
+  float fresnel = pow(1.0 - max(dot(N, V), 0.0), 3.6);
+  vec3 spec = vec3(0.07 + 0.32 * (1.0 - rough)) * specPow * mix(0.95, 0.14, rough);
+
+  float floorProx = exp(-max(vWorldPos.y + 1.8, 0.0) * 1.3);
+  vec3 bounce = uSkyBot * 0.22 * floorProx;
+
+  vec3 diff = baseCol * (ambient + vec3(1.08, 1.03, 0.94) * (NdotL * 0.98) + vec3(0.55, 0.72, 0.96) * fill + bounce);
+  vec3 rim  = mix(vec3(0.55, 0.74, 0.98), baseCol * 1.35, 0.45) * fresnel * (0.28 + 0.42 * (1.0 - rough));
+
+  vec3 col = diff + spec + rim;
+  if (uShowHeatmap > 0.5) col += strainHeatmap(vStrain) * clamp(vStrain * 0.08, 0.0, 0.22);
+
+  float dist = length(uCamPos - vWorldPos);
+  float fog = 1.0 - exp(-dist * dist * 0.0012);
+  col = mix(col, vec3(0.07, 0.085, 0.115), clamp(fog, 0.0, 0.75));
+
+  col = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
+  col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
+  fragColor = vec4(col, 1.0);
+}
+`
+);
+
 // =================================================================================================
 // 2. MATH & CAMERA UTILITIES
 // =================================================================================================
@@ -610,10 +793,14 @@ class XpbdWorld {
     this.tetCount = this._tets.length / 4;
     this.tetIdx = new Int32Array(this._tets);
     this.tetQ = new Float32Array(this.tetCount * 9);
+    this.tetCof = new Float32Array(this.tetCount * 9);
     this.tetVol = new Float32Array(this.tetCount);
     this.tetStrain = new Float32Array(this.tetCount);
     this.nodeStrain = new Float32Array(this.n);
     for (let t = 0; t < this.tetCount; t++) {
+      // Initialize Nanson's cofactor normal matrix to identity
+      const co = t * 9;
+      this.tetCof[co] = 1; this.tetCof[co+4] = 1; this.tetCof[co+8] = 1;
       const i0 = this.tetIdx[t*4], i1 = this.tetIdx[t*4+1], i2 = this.tetIdx[t*4+2], i3 = this.tetIdx[t*4+3];
       const x0 = this.pos[i0*3], y0 = this.pos[i0*3+1], z0 = this.pos[i0*3+2];
       // Columns of Dm: c0 = x1-x0, c1 = x2-x0, c2 = x3-x0
@@ -728,10 +915,14 @@ class XpbdWorld {
       const h01 = e00*q01 + e01*q11 + e02*q21, h11 = e10*q01 + e11*q11 + e12*q21, h21 = e20*q01 + e21*q11 + e22*q21;
       const h02 = e00*q02 + e01*q12 + e02*q22, h12 = e10*q02 + e11*q12 + e12*q22, h22 = e20*q02 + e21*q12 + e22*q22;
 
-      // Cofactor columns of F: cf0 = f1 x f2, cf1 = f2 x f0, cf2 = f0 x f1
+      // Cofactor columns of F: cf0 = f1 x f2, cf1 = f2 x f0, cf2 = f0 x f1 (Nanson's normal transform!)
       const c00 = h11*h22 - h21*h12, c10 = h21*h02 - h01*h22, c20 = h01*h12 - h11*h02;
       const c01 = h12*h20 - h22*h10, c11 = h22*h00 - h02*h20, c21 = h02*h10 - h12*h00;
       const c02 = h10*h21 - h20*h11, c12 = h20*h01 - h00*h21, c22 = h00*h11 - h10*h01;
+      const tc = this.tetCof;
+      tc[o]   = c00; tc[o+1] = c10; tc[o+2] = c20;
+      tc[o+3] = c01; tc[o+4] = c11; tc[o+5] = c21;
+      tc[o+6] = c02; tc[o+7] = c12; tc[o+8] = c22;
 
       const J = h00*c00 + h10*c10 + h20*c20;
       const cH = J - gamma;
@@ -1918,7 +2109,54 @@ class DynamicMeshBuilder {
     this.addSphere(hx+0.38, hy+0.14, hz, 0.12, 0.22, 0.075, [0.82,0.11,0.11], [0.22,0.02,0.35], 8, 12);
   }
 
-  buildFromWorld(world, timeSec, showCollider) {
+  addAlloyRimAndCaliper(hx, hy, hz, rimR, bz, spinAngle) {
+    const rimSegs = 40;
+    const lipR = rimR + 0.025, innerR = rimR - 0.055;
+    for (let si = 0; si < rimSegs; si++) {
+      const a0 = (si / rimSegs) * Math.PI * 2 + spinAngle;
+      const a1 = ((si + 1) / rimSegs) * Math.PI * 2 + spinAngle;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const b00 = [hx+c0*innerR, hy+s0*innerR, hz-bz], b10 = [hx+c1*innerR, hy+s1*innerR, hz-bz];
+      const b11 = [hx+c1*innerR, hy+s1*innerR, hz+bz], b01 = [hx+c0*innerR, hy+s0*innerR, hz+bz];
+      const pushBarrel = (p, nx, ny) => this.pushVert(p[0],p[1],p[2], nx,ny,0, 0.34,0.37,0.42, 0.24, 0.0, 0.88);
+      pushBarrel(b00,-c0,-s0); pushBarrel(b10,-c1,-s1); pushBarrel(b11,-c1,-s1);
+      pushBarrel(b00,-c0,-s0); pushBarrel(b11,-c1,-s1); pushBarrel(b01,-c0,-s0);
+      for (const sgn of [-1, 1]) {
+        const zf = hz + sgn * bz, zIn = hz + sgn * (bz - 0.035);
+        const q0 = [hx+c0*innerR, hy+s0*innerR, zIn], q1 = [hx+c1*innerR, hy+s1*innerR, zIn];
+        const q2 = [hx+c1*lipR,   hy+s1*lipR,   zf],  q3 = [hx+c0*lipR,   hy+s0*lipR,   zf];
+        const pushLip = (p, c, s) => this.pushVert(p[0],p[1],p[2], c*0.35, s*0.35, sgn*0.93, 0.80,0.84,0.90, 0.14, 0.0, 0.95);
+        pushLip(q0,c0,s0); pushLip(q1,c1,s1); pushLip(q2,c1,s1);
+        pushLip(q0,c0,s0); pushLip(q2,c1,s1); pushLip(q3,c0,s0);
+      }
+    }
+    for (let sp = 0; sp < 5; sp++) {
+      const a = (sp / 5) * Math.PI * 2 + spinAngle;
+      const ca = Math.cos(a), sa = Math.sin(a), px = -sa, py = ca;
+      for (const sgn of [-1, 1]) {
+        const zFront = hz + sgn*(bz*0.76), zBack = hz + sgn*(bz*0.50);
+        const zHubF  = hz + sgn*(bz*0.56), zHubB = hz + sgn*(bz*0.34);
+        const w0 = 0.058, w1 = 0.044, r0 = 0.16, r1 = innerR + 0.015;
+        const f0=[hx+ca*r0-px*w0,hy+sa*r0-py*w0,zHubF], f1=[hx+ca*r0+px*w0,hy+sa*r0+py*w0,zHubF];
+        const f2=[hx+ca*r1+px*w1,hy+sa*r1+py*w1,zFront], f3=[hx+ca*r1-px*w1,hy+sa*r1-py*w1,zFront];
+        const k0=[hx+ca*r0-px*w0,hy+sa*r0-py*w0,zHubB], k1=[hx+ca*r0+px*w0,hy+sa*r0+py*w0,zHubB];
+        const k2=[hx+ca*r1+px*w1,hy+sa*r1+py*w1,zBack],  k3=[hx+ca*r1-px*w1,hy+sa*r1-py*w1,zBack];
+        this.pushTriFlat(...f0, ...f1, ...f2, 0.74,0.78,0.85, 0.16, 0.0, 0.94);
+        this.pushTriFlat(...f0, ...f2, ...f3, 0.74,0.78,0.85, 0.16, 0.0, 0.94);
+        this.pushTriFlat(...f1, ...k1, ...k2, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...f1, ...k2, ...f2, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...k0, ...f0, ...f3, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+        this.pushTriFlat(...k0, ...f3, ...k3, 0.46,0.50,0.56, 0.24, 0.0, 0.88);
+      }
+      this.addSphere(hx+ca*0.135, hy+sa*0.135, hz+bz*0.58, 0.026,0.026,0.026, [0.90,0.92,0.96], [0.10,0.0,0.96], 5, 8);
+      this.addSphere(hx+ca*0.135, hy+sa*0.135, hz-bz*0.58, 0.026,0.026,0.026, [0.90,0.92,0.96], [0.10,0.0,0.96], 5, 8);
+    }
+    this.addSphere(hx, hy, hz, 0.20, 0.20, bz*0.62, [0.22,0.24,0.28], [0.20,0.0,0.88], 10, 18);
+    this.addSphere(hx, hy, hz, 0.48, 0.48, 0.032,   [0.58,0.60,0.64], [0.22,0.0,0.90], 8, 24);
+    this.addSphere(hx+0.38, hy+0.14, hz, 0.12, 0.22, 0.075, [0.82,0.11,0.11], [0.22,0.02,0.35], 8, 12);
+  }
+
+  buildFromWorld(world, timeSec, showCollider, vatPoseOverride = null) {
     this.clear();
     // Static hardware / reef rocks / posts
     for (const st of world.staticProps) {
@@ -1940,12 +2178,36 @@ class DynamicMeshBuilder {
     // 5. Woven cloth meshes
     for (const cg of world.clothGrids) this.addClothGrid(world, cg);
     // 5b. Pneumatic XPBD Tires + 3D Volumetric Neo-Hookean FEM Soft-Body Tires
-    for (const ty of world.tyres) this.addTyreMesh(world, ty);
-    for (const ft of world.femTyres) this.addFemTyreMesh(world, ft, cfg.femHeatmap);
+    // In High-Poly GPU Cage or Baked VAT mode, render ONLY the forged 5-spoke alloy rim & caliper here
+    // while the GPU High-Poly Vertex Shader renders the shared sculpted ~12k-tri performance tire!
+    const useHighPoly = (typeof cfg !== "undefined" && cfg.tireDeformMode !== "coarse");
+    for (const ty of world.tyres) {
+      if (useHighPoly) {
+        const hx = vatPoseOverride ? vatPoseOverride.hubX : ty.hubX;
+        const hy = vatPoseOverride ? vatPoseOverride.hubY : ty.hubY;
+        const sp = vatPoseOverride ? vatPoseOverride.spinAngle : ty.spinAngle;
+        this.addAlloyRimAndCaliper(hx, hy, ty.hubZ, ty.rimR, ty.beadZ, sp);
+      } else {
+        this.addTyreMesh(world, ty);
+      }
+    }
+    for (const ft of world.femTyres) {
+      if (useHighPoly) {
+        const hx = vatPoseOverride ? vatPoseOverride.hubX : ft.hubX;
+        const hy = vatPoseOverride ? vatPoseOverride.hubY : ft.hubY;
+        const sp = vatPoseOverride ? vatPoseOverride.spinAngle : ft.spinAngle;
+        this.addAlloyRimAndCaliper(hx, hy, ft.hubZ, ft.rimR, ft.beadZ, sp);
+      } else {
+        this.addFemTyreMesh(world, ft, cfg.femHeatmap);
+      }
+    }
     // 6. Interactive 3D Collider Sphere
     if (showCollider && world.collider.enabled) {
       const c = world.collider;
-      this.addSphere(c.pos[0], c.pos[1], c.pos[2], c.radius, c.radius, c.radius, [0.32, 0.56, 0.85], [0.14, 0.15, 0.35], 14, 22);
+      const cx = vatPoseOverride ? vatPoseOverride.colX : c.pos[0];
+      const cy = vatPoseOverride ? vatPoseOverride.colY : c.pos[1];
+      const cz = vatPoseOverride ? vatPoseOverride.colZ : c.pos[2];
+      this.addSphere(cx, cy, cz, c.radius, c.radius, c.radius, [0.32, 0.56, 0.85], [0.14, 0.15, 0.35], 14, 22);
     }
   }
 }
@@ -2570,10 +2832,758 @@ const SCENES = [
 ];
 
 // =================================================================================================
+// 5b. SHARED HIGH-POLY AUTOMOTIVE TIRE + GPU CAGE EMBEDDING + BAKED RGBA32F VAT ENGINE
+// =================================================================================================
+class HighPolyTireGpu {
+  constructor(gl) {
+    this.gl = gl;
+    this.ready = false;
+    this.isFem = true;
+    this.vertCount = 0;
+    this.triCount = 0;
+    this.indexCount = 0;
+    this.VAT_W = 256;
+    this.VAT_FRAMES = 64;
+    this.vatRowsPerFrame = 0;
+    this.vatBaked = false;
+    this.vatSolverTag = "";
+    this.vatFrame = 0.0;
+    this.vatPlaying = true;
+    this.vatSpeed = 1.0;
+    this.vatMeta = [];
+    this.vatBounds = { min: [0,0,0], max: [0,0,0] };
+    this.vatPosData = null;
+    this.vatNrmData = null;
+
+    // Static rest geometry & binding arrays (kept for CPU VAT baking & bounds export)
+    this.restPos = null;
+    this.restNrm = null;
+    this.cageIdx = null;
+    this.cageW = null;
+    this.extra = null;
+    this.vboData = null;
+    this.indices = null;
+
+    // GPU objects
+    this.vao = gl.createVertexArray();
+    this.vbo = gl.createBuffer();
+    this.ibo = gl.createBuffer();
+    this.nodeTex = this._makeTex();
+    this.tetNrmTex = this._makeTex();
+    this.vatPosTex = this._makeTex();
+    this.vatNrmTex = this._makeTex();
+    this.nodeUploadBuf = new Float32Array(1024 * 4);
+    this.tetNrmUploadBuf = new Float32Array(2048 * 3 * 4);
+
+    // Uniforms
+    this.u = {
+      vp: gl.getUniformLocation(hpProgram, "uViewProj"),
+      mode: gl.getUniformLocation(hpProgram, "uDeformMode"),
+      nodeTex: gl.getUniformLocation(hpProgram, "uNodeTex"),
+      tetNrmTex: gl.getUniformLocation(hpProgram, "uTetNrmTex"),
+      vatPosTex: gl.getUniformLocation(hpProgram, "uVatPosTex"),
+      vatNrmTex: gl.getUniformLocation(hpProgram, "uVatNrmTex"),
+      vatRows: gl.getUniformLocation(hpProgram, "uVatRowsPerFrame"),
+      vatF0: gl.getUniformLocation(hpProgram, "uVatFrame0"),
+      vatF1: gl.getUniformLocation(hpProgram, "uVatFrame1"),
+      vatFrac: gl.getUniformLocation(hpProgram, "uVatFrac"),
+      cam: gl.getUniformLocation(hpProgram, "uCamPos"),
+      sun: gl.getUniformLocation(hpProgram, "uSunDir"),
+      top: gl.getUniformLocation(hpProgram, "uSkyTop"),
+      bot: gl.getUniformLocation(hpProgram, "uSkyBot"),
+      heatmap: gl.getUniformLocation(hpProgram, "uShowHeatmap")
+    };
+  }
+
+  _makeTex() {
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Initialize 1x1 RGBA32F pixel so texture unit is always WebGL2-complete before first bake/upload
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, 1, 1, 0, gl.RGBA, gl.FLOAT, new Float32Array([0, 0, 0, 0]));
+    return t;
+  }
+
+  // Builds ONE shared ultra-detailed sculpted automotive sport tire (~12,032 triangles)
+  // Used identically by BOTH 3D Volumetric Neo-Hookean FEM and Pneumatic Tire XPBD!
+  _buildHighPolyGeometry(hx, hy, hz, rimR, outerR, halfW) {
+    const posArr = [], nrmArr = [], colArr = [], matArr = [], idxArr = [];
+    const addV = (px, py, pz, nx, ny, nz, cr, cg, cb, rough, isTread, ao) => {
+      const id = posArr.length / 3;
+      const nl = Math.hypot(nx, ny, nz) || 1;
+      posArr.push(px, py, pz);
+      nrmArr.push(nx/nl, ny/nl, nz/nl);
+      colArr.push(cr, cg, cb);
+      matArr.push(rough, isTread, ao);
+      return id;
+    };
+
+    // 1. High-resolution 33-station sculpted cross-section profile (bead, rim guard, sidewall ribs, 4 rain grooves, 5 tread ribs)
+    const H = outerR - rimR;
+    const gD = 0.022; // crisp circumferential drainage channel depth
+    const halfProf = [
+      // [r, z, isTread, ao, rough] (mirrored across z = 0)
+      [rimR + 0.006,           halfW * 0.77, 0, 0.78, 0.56], // 0: bead seat
+      [rimR + H * 0.09,        halfW * 0.88, 0, 0.92, 0.44], // 1: molded rim protector ridge
+      [rimR + H * 0.16,        halfW * 0.85, 0, 0.85, 0.52], // 2: rim guard undercut
+      [rimR + H * 0.32,        halfW * 0.97, 0, 0.96, 0.50], // 3: lower sidewall curve
+      [rimR + H * 0.48,        halfW * 1.02, 0, 0.98, 0.48], // 4: sidewall bulge crest
+      [rimR + H * 0.54,        halfW * 1.032,0, 1.00, 0.42], // 5: embossed sidewall molding ring
+      [rimR + H * 0.60,        halfW * 1.01, 0, 0.94, 0.50], // 6: upper sidewall
+      [rimR + H * 0.78,        halfW * 0.94, 0, 0.94, 0.56], // 7: upper sidewall taper
+      [outerR - 0.042,         halfW * 0.84, 0, 0.92, 0.62], // 8: shoulder chamfer base
+      [outerR - 0.014,         halfW * 0.76, 1, 0.98, 0.72], // 9: outer shoulder rib edge
+      [outerR - 0.006,         halfW * 0.56, 1, 0.98, 0.74], // 10: outer shoulder rib inner
+      [outerR - gD,            halfW * 0.52, 1, 0.42, 0.84], // 11: outer rain groove wall A
+      [outerR - gD,            halfW * 0.45, 1, 0.42, 0.84], // 12: outer rain groove wall B
+      [outerR - 0.002,         halfW * 0.41, 1, 0.98, 0.74], // 13: mid rib outer
+      [outerR - 0.001,         halfW * 0.21, 1, 0.98, 0.74], // 14: mid rib inner
+      [outerR - gD,            halfW * 0.17, 1, 0.40, 0.84], // 15: inner rain groove wall A
+      [outerR - gD,            halfW * 0.10, 1, 0.40, 0.84], // 16: inner rain groove wall B
+      [outerR,                 0.0,          1, 1.00, 0.74]  // 17: center crown rib apex
+    ];
+    // Mirror to full 35 stations from -z to +z
+    const prof = [];
+    for (let i = 0; i < halfProf.length - 1; i++) {
+      const p = halfProf[i];
+      prof.push([p[0], -p[1], p[2], p[3], p[4]]);
+    }
+    for (let i = halfProf.length - 1; i >= 0; i--) {
+      const p = halfProf[i];
+      prof.push([p[0],  p[1], p[2], p[3], p[4]]);
+    }
+    const P = prof.length; // 35 stations
+    const SECS = 128;
+
+    // Precompute smooth profile 2D outward normals (nr, nz)
+    const profN = [];
+    for (let pi = 0; pi < P; pi++) {
+      const pPrev = prof[Math.max(0, pi - 1)];
+      const pNext = prof[Math.min(P - 1, pi + 1)];
+      const dr = pNext[0] - pPrev[0], dz = pNext[1] - pPrev[1];
+      let nr = dz, nz = -dr;
+      // Ensure outward away from (rimR, 0)
+      if (nr * (prof[pi][0] - rimR) + nz * prof[pi][1] < 0) { nr = -nr; nz = -nz; }
+      const l = Math.hypot(nr, nz) || 1;
+      profN.push([nr / l, nz / l]);
+    }
+
+    const baseStart = 0;
+    for (let si = 0; si < SECS; si++) {
+      const a = (si / SECS) * Math.PI * 2;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      for (let pi = 0; pi < P; pi++) {
+        const [r, z, isTr, ao, rough] = prof[pi];
+        const [nr, nz] = profN[pi];
+        const col = isTr ? [0.115, 0.120, 0.132] : [0.095, 0.100, 0.112];
+        addV(hx + ca * r, hy + sa * r, hz + z, ca * nr, sa * nr, nz, col[0], col[1], col[2], rough, isTr, ao);
+      }
+    }
+    for (let si = 0; si < SECS; si++) {
+      const sNext = (si + 1) % SECS;
+      for (let pi = 0; pi < P - 1; pi++) {
+        const i00 = baseStart + si * P + pi;
+        const i10 = baseStart + sNext * P + pi;
+        const i11 = baseStart + sNext * P + pi + 1;
+        const i01 = baseStart + si * P + pi + 1;
+        idxArr.push(i00, i10, i11, i00, i11, i01);
+      }
+    }
+
+    // Helper: add a crisp 3D beveled lug block (8 verts, 10 tris: top + 4 chamfered walls)
+    const addLugPrism = (a0, a1, z0, z1, rBase, rTop, skewA, col, rough) => {
+      const insetA = (a1 - a0) * 0.16, insetZ = (z1 - z0) * 0.12;
+      const bA = [a0, a1, a1 + skewA, a0 + skewA];
+      const bZ = [z0, z0, z1, z1];
+      const tA = [a0 + insetA, a1 - insetA, a1 - insetA + skewA, a0 + insetA + skewA];
+      const tZ = [z0 + insetZ, z0 + insetZ, z1 - insetZ, z1 - insetZ];
+      const bIdx = [], tIdx = [];
+      for (let k = 0; k < 4; k++) {
+        const cb = Math.cos(bA[k]), sb = Math.sin(bA[k]);
+        const ct = Math.cos(tA[k]), st = Math.sin(tA[k]);
+        bIdx.push(addV(hx + cb*rBase, hy + sb*rBase, hz + bZ[k], cb, sb, (k>=2?0.35:-0.35), col[0]*0.78, col[1]*0.78, col[2]*0.78, rough+0.08, 1, 0.72));
+        tIdx.push(addV(hx + ct*rTop,  hy + st*rTop,  hz + tZ[k], ct, st, 0.0, col[0], col[1], col[2], rough, 1, 1.0));
+      }
+      // Top cap
+      idxArr.push(tIdx[0], tIdx[1], tIdx[2], tIdx[0], tIdx[2], tIdx[3]);
+      // 4 side walls
+      for (let k = 0; k < 4; k++) {
+        const kn = (k + 1) & 3;
+        idxArr.push(bIdx[k], bIdx[kn], tIdx[kn], bIdx[k], tIdx[kn], tIdx[k]);
+      }
+    };
+
+    // 2. Sculpted 3D Asymmetric Performance Tread Blocks (64 pitches x 5 ribs = 320 beveled directional blocks!)
+    const lugBands = [
+      // [zStart, zEnd, rBase, lugH, phaseOffset, chevronSkew]
+      [-halfW * 0.75, -halfW * 0.54, outerR - 0.011, 0.016, 0.0,  -0.022], // inner shoulder chevron
+      [-halfW * 0.43, -halfW * 0.19, outerR - 0.003, 0.015, 0.5,  -0.014], // inner intermediate rib
+      [-halfW * 0.09,  halfW * 0.09, outerR - 0.001, 0.014, 0.25,  0.006], // center continuous notched rib
+      [ halfW * 0.19,  halfW * 0.43, outerR - 0.003, 0.015, 0.5,   0.014], // outer intermediate rib
+      [ halfW * 0.54,  halfW * 0.75, outerR - 0.011, 0.016, 0.0,   0.022]  // outer shoulder chevron
+    ];
+    const PITCHES = 64;
+    const dPitch = (Math.PI * 2) / PITCHES;
+    for (let bi = 0; bi < lugBands.length; bi++) {
+      const [z0, z1, rB, lugH, phase, skew] = lugBands[bi];
+      const fillFrac = (bi === 2) ? 0.76 : 0.66;
+      for (let k = 0; k < PITCHES; k++) {
+        const aStart = (k + phase) * dPitch;
+        const aEnd = aStart + dPitch * fillFrac;
+        addLugPrism(aStart, aEnd, z0, z1, rB, rB + lugH, skew, [0.135, 0.142, 0.156], 0.72);
+      }
+    }
+
+    // 3. Sculpted Sidewall Radial Shoulder Grip Pads (32 per side = 64 raised pads!)
+    const PAD_COUNT = 32;
+    const dPad = (Math.PI * 2) / PAD_COUNT;
+    for (const sgn of [-1, 1]) {
+      const zSurf = sgn * (halfW * 0.95);
+      const zTop  = sgn * (halfW * 0.995);
+      const rIn = rimR + H * 0.64, rOut = outerR - 0.055;
+      for (let k = 0; k < PAD_COUNT; k++) {
+        const a0 = k * dPad + 0.02, a1 = a0 + dPad * 0.46;
+        const c0 = Math.cos(a0), s0 = Math.sin(a0), c1 = Math.cos(a1), s1 = Math.sin(a1);
+        const am = 0.5 * (a0 + a1), cm = Math.cos(am), sm = Math.sin(am);
+        const b0 = addV(hx+c0*rIn,  hy+s0*rIn,  hz+zSurf, cm*0.25, sm*0.25, sgn*0.96, 0.09,0.095,0.11, 0.55, 0, 0.80);
+        const b1 = addV(hx+c1*rIn,  hy+s1*rIn,  hz+zSurf, cm*0.25, sm*0.25, sgn*0.96, 0.09,0.095,0.11, 0.55, 0, 0.80);
+        const b2 = addV(hx+c1*rOut, hy+s1*rOut, hz+zSurf, cm*0.25, sm*0.25, sgn*0.96, 0.09,0.095,0.11, 0.55, 0, 0.80);
+        const b3 = addV(hx+c0*rOut, hy+s0*rOut, hz+zSurf, cm*0.25, sm*0.25, sgn*0.96, 0.09,0.095,0.11, 0.55, 0, 0.80);
+        const t0 = addV(hx+c0*(rIn+0.01),  hy+s0*(rIn+0.01),  hz+zTop, cm*0.18, sm*0.18, sgn*0.98, 0.14,0.148,0.165, 0.44, 0, 1.0);
+        const t1 = addV(hx+c1*(rIn+0.01),  hy+s1*(rIn+0.01),  hz+zTop, cm*0.18, sm*0.18, sgn*0.98, 0.14,0.148,0.165, 0.44, 0, 1.0);
+        const t2 = addV(hx+c1*(rOut-0.01), hy+s1*(rOut-0.01), hz+zTop, cm*0.18, sm*0.18, sgn*0.98, 0.14,0.148,0.165, 0.44, 0, 1.0);
+        const t3 = addV(hx+c0*(rOut-0.01), hy+s0*(rOut-0.01), hz+zTop, cm*0.18, sm*0.18, sgn*0.98, 0.14,0.148,0.165, 0.44, 0, 1.0);
+        idxArr.push(t0, t1, t2, t0, t2, t3);
+        idxArr.push(b0, b1, t1, b0, t1, t0);
+        idxArr.push(b1, b2, t2, b1, t2, t1);
+        idxArr.push(b2, b3, t3, b2, t3, t2);
+        idxArr.push(b3, b0, t0, b3, t0, t3);
+      }
+    }
+
+    return {
+      pos: new Float32Array(posArr),
+      nrm: new Float32Array(nrmArr),
+      col: new Float32Array(colArr),
+      mat: new Float32Array(matArr),
+      idx: new Uint32Array(idxArr),
+      vertCount: posArr.length / 3,
+      triCount: idxArr.length / 3
+    };
+  }
+
+  // Bind the shared high-poly tire mesh to whichever tire solver is active (3D FEM OR Pneumatic XPBD)
+  bindToWorld(world) {
+    this.ready = false;
+    this.vatBaked = false;
+    this.vatFrame = 0.0;
+    const hasFem = world.femTyres.length > 0;
+    const hasXpbd = world.tyres.length > 0;
+    if (!hasFem && !hasXpbd) return;
+
+    this.isFem = hasFem;
+    const src = hasFem ? world.femTyres[0] : world.tyres[0];
+    const halfW = src.beadZ / (hasFem ? 0.78 : 0.76);
+    const geom = this._buildHighPolyGeometry(src.hubX, src.hubY, src.hubZ, src.rimR, src.outerR, halfW);
+    const V = geom.vertCount;
+    this.vertCount = V;
+    this.triCount = geom.triCount;
+    this.indexCount = geom.idx.length;
+    this.restPos = geom.pos;
+    this.restNrm = geom.nrm;
+    this.indices = geom.idx;
+    this.cageIdx = new Int32Array(V * 4);
+    this.cageW   = new Float32Array(V * 4);
+    this.extra   = new Float32Array(V * 4);
+
+    if (hasFem) {
+      this._bindFemTetrahedra(world, src, geom);
+    } else {
+      this._bindXpbdQuadCage(world, src, geom);
+    }
+
+    // Pack static interleaved VBO (21 floats/vert = 84 bytes/vert)
+    const S21 = 21;
+    const vbo21 = new Float32Array(V * S21);
+    for (let i = 0; i < V; i++) {
+      const o = i * S21, i3 = i * 3, i4 = i * 4;
+      vbo21[o+0] = geom.nrm[i3];   vbo21[o+1] = geom.nrm[i3+1]; vbo21[o+2] = geom.nrm[i3+2];
+      vbo21[o+3] = geom.col[i3];   vbo21[o+4] = geom.col[i3+1]; vbo21[o+5] = geom.col[i3+2];
+      vbo21[o+6] = geom.mat[i3];   vbo21[o+7] = geom.mat[i3+1]; vbo21[o+8] = geom.mat[i3+2];
+      vbo21[o+9]  = this.cageIdx[i4];   vbo21[o+10] = this.cageIdx[i4+1]; vbo21[o+11] = this.cageIdx[i4+2]; vbo21[o+12] = this.cageIdx[i4+3];
+      vbo21[o+13] = this.cageW[i4];     vbo21[o+14] = this.cageW[i4+1];   vbo21[o+15] = this.cageW[i4+2];   vbo21[o+16] = this.cageW[i4+3];
+      vbo21[o+17] = this.extra[i4];     vbo21[o+18] = this.extra[i4+1];   vbo21[o+19] = this.extra[i4+2];   vbo21[o+20] = this.extra[i4+3];
+    }
+    this.vboData = vbo21;
+
+    const gl = this.gl;
+    gl.bindVertexArray(this.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, vbo21, gl.STATIC_DRAW);
+    const bytes = S21 * 4;
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, bytes, 0);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, bytes, 12);
+    gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 3, gl.FLOAT, false, bytes, 24);
+    gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, bytes, 36);
+    gl.enableVertexAttribArray(4); gl.vertexAttribPointer(4, 4, gl.FLOAT, false, bytes, 52);
+    gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.FLOAT, false, bytes, 68);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, geom.idx, gl.STATIC_DRAW);
+    gl.bindVertexArray(null);
+
+    this.vatRowsPerFrame = Math.ceil(V / this.VAT_W);
+    this.ready = true;
+  }
+
+  // Exact 3D Tetrahedral Barycentric Embedding onto world.tetIdx / world.tetQ!
+  _bindFemTetrahedra(world, ft, geom) {
+    const S = ft.sectors, P = ft.profile;
+    const tetsPerSector = (P - 1) * 5; // 6 * 5 = 30 tets per sector
+    const pos = world.pos, tIdx = world.tetIdx, Q = world.tetQ;
+    const hx = ft.hubX, hy = ft.hubY;
+    const V = geom.vertCount;
+
+    for (let vi = 0; vi < V; vi++) {
+      const v3 = vi * 3;
+      const px = geom.pos[v3], py = geom.pos[v3+1], pz = geom.pos[v3+2];
+      let ang = Math.atan2(py - hy, px - hx);
+      if (ang < 0) ang += Math.PI * 2;
+      const si0 = Math.floor((ang / (Math.PI * 2)) * S) % S;
+
+      let bestT = si0 * tetsPerSector;
+      let bestScore = -1e9;
+      let bw0 = 1, bw1 = 0, bw2 = 0, bw3 = 0;
+
+      // Search matching sector and immediate neighbors for exact containing (or closest) 3D tet
+      for (let ds = -1; ds <= 1; ds++) {
+        const si = (si0 + ds + S) % S;
+        const tStart = si * tetsPerSector;
+        const tEnd = Math.min(world.tetCount, tStart + tetsPerSector);
+        for (let t = tStart; t < tEnd; t++) {
+          const i0 = tIdx[t*4];
+          const dx = px - pos[i0*3], dy = py - pos[i0*3+1], dz = pz - pos[i0*3+2];
+          const o = t * 9;
+          const w1 = Q[o+0]*dx + Q[o+1]*dy + Q[o+2]*dz;
+          const w2 = Q[o+3]*dx + Q[o+4]*dy + Q[o+5]*dz;
+          const w3 = Q[o+6]*dx + Q[o+7]*dy + Q[o+8]*dz;
+          const w0 = 1.0 - w1 - w2 - w3;
+          const minW = Math.min(w0, w1, w2, w3);
+          const maxW = Math.max(w0, w1, w2, w3);
+          // Prefer strictly interior tets (minW >= 0), otherwise closest valid boundary tet with minimal extrapolation!
+          const score = minW - Math.max(0, maxW - 1.0) * 0.25;
+          if (score > bestScore) {
+            bestScore = score;
+            bestT = t;
+            bw0 = w0; bw1 = w1; bw2 = w2; bw3 = w3;
+            if (minW >= -1e-4) break;
+          }
+        }
+        if (bestScore >= -1e-4) break;
+      }
+
+      const o4 = vi * 4;
+      this.cageIdx[o4]   = tIdx[bestT*4];
+      this.cageIdx[o4+1] = tIdx[bestT*4+1];
+      this.cageIdx[o4+2] = tIdx[bestT*4+2];
+      this.cageIdx[o4+3] = tIdx[bestT*4+3];
+      this.cageW[o4]   = bw0;
+      this.cageW[o4+1] = bw1;
+      this.cageW[o4+2] = bw2;
+      this.cageW[o4+3] = bw3;
+      this.extra[o4]   = bestT;
+      this.extra[o4+1] = 0; this.extra[o4+2] = 0; this.extra[o4+3] = 0;
+    }
+  }
+
+  // Exact Bilinear Quad-Cage + Local Normal Frame Embedding onto Pneumatic XPBD Tire!
+  _bindXpbdQuadCage(world, ty, geom) {
+    const S = ty.sectors, P = ty.profile, base = ty.startIdx;
+    const pos = world.pos, pts = ty.profilePts;
+    const hx = ty.hubX, hy = ty.hubY, hz = ty.hubZ;
+    const V = geom.vertCount;
+
+    for (let vi = 0; vi < V; vi++) {
+      const v3 = vi * 3;
+      const px = geom.pos[v3], py = geom.pos[v3+1], pz = geom.pos[v3+2];
+      const rx = px - hx, ry = py - hy, rz = pz - hz;
+      const rV = Math.hypot(rx, ry);
+      let ang = Math.atan2(ry, rx);
+      if (ang < 0) ang += Math.PI * 2;
+      const sf = (ang / (Math.PI * 2)) * S;
+      const si = Math.floor(sf) % S;
+      const sNext = (si + 1) % S;
+      const u = sf - Math.floor(sf);
+
+      // Find closest profile segment [pi, pi+1] in (r, z) space
+      let bestPi = 0, bestV = 0, bestD2 = 1e9;
+      for (let pi = 0; pi < P - 1; pi++) {
+        const r0 = pts[pi][0], z0 = pts[pi][1];
+        const r1 = pts[pi+1][0], z1 = pts[pi+1][1];
+        const dr = r1 - r0, dz = z1 - z0;
+        const len2 = dr*dr + dz*dz || 1;
+        const tv = Math.max(0, Math.min(1, ((rV - r0)*dr + (rz - z0)*dz) / len2));
+        const cr = r0 + dr * tv, cz = z0 + dz * tv;
+        const d2 = (rV - cr)*(rV - cr) + (rz - cz)*(rz - cz);
+        if (d2 < bestD2) { bestD2 = d2; bestPi = pi; bestV = tv; }
+      }
+
+      const i00 = base + si * P + bestPi;
+      const i10 = base + sNext * P + bestPi;
+      const i11 = base + sNext * P + bestPi + 1;
+      const i01 = base + si * P + bestPi + 1;
+      const w00 = (1-u)*(1-bestV), w10 = u*(1-bestV), w11 = u*bestV, w01 = (1-u)*bestV;
+
+      const q00x = pos[i00*3], q00y = pos[i00*3+1], q00z = pos[i00*3+2];
+      const q10x = pos[i10*3], q10y = pos[i10*3+1], q10z = pos[i10*3+2];
+      const q11x = pos[i11*3], q11y = pos[i11*3+1], q11z = pos[i11*3+2];
+      const q01x = pos[i01*3], q01y = pos[i01*3+1], q01z = pos[i01*3+2];
+
+      const bx = w00*q00x + w10*q10x + w11*q11x + w01*q01x;
+      const by = w00*q00y + w10*q10y + w11*q11y + w01*q01y;
+      const bz = w00*q00z + w10*q10z + w11*q11z + w01*q01z;
+
+      const eUx = 0.5*((q10x-q00x)+(q11x-q01x)), eUy = 0.5*((q10y-q00y)+(q11y-q01y)), eUz = 0.5*((q10z-q00z)+(q11z-q01z));
+      const eVx = 0.5*((q01x-q00x)+(q11x-q10x)), eVy = 0.5*((q01y-q00y)+(q11y-q10y)), eVz = 0.5*((q01z-q00z)+(q11z-q10z));
+      const tl = Math.hypot(eUx, eUy, eUz) || 1;
+      const Tx = eUx/tl, Ty = eUy/tl, Tz = eUz/tl;
+      let Nx = eUy*eVz - eUz*eVy, Ny = eUz*eVx - eUx*eVz, Nz = eUx*eVy - eUy*eVx;
+      const nl = Math.hypot(Nx, Ny, Nz) || 1;
+      Nx /= nl; Ny /= nl; Nz /= nl;
+      const Bx = Ny*Tz - Nz*Ty, By = Nz*Tx - Nx*Tz, Bz = Nx*Ty - Ny*Tx;
+
+      const hOff = (px - bx)*Nx + (py - by)*Ny + (pz - bz)*Nz;
+      const rnx = geom.nrm[v3], rny = geom.nrm[v3+1], rnz = geom.nrm[v3+2];
+
+      const o4 = vi * 4;
+      this.cageIdx[o4] = i00; this.cageIdx[o4+1] = i10; this.cageIdx[o4+2] = i11; this.cageIdx[o4+3] = i01;
+      this.cageW[o4] = w00; this.cageW[o4+1] = w10; this.cageW[o4+2] = w11; this.cageW[o4+3] = w01;
+      this.extra[o4] = rnx*Tx + rny*Ty + rnz*Tz;
+      this.extra[o4+1] = rnx*Bx + rny*By + rnz*Bz;
+      this.extra[o4+2] = rnx*Nx + rny*Ny + rnz*Nz;
+      this.extra[o4+3] = hOff;
+    }
+  }
+
+  // Upload tiny RGBA32F node texture (~8 KB) + Nanson cofactor texture (~39 KB) to GPU every frame!
+  uploadLiveCage(world) {
+    if (!this.ready) return;
+    const gl = this.gl;
+    const N = Math.max(1, world.n);
+    if (this.nodeUploadBuf.length < N * 4) this.nodeUploadBuf = new Float32Array(N * 4);
+    const nb = this.nodeUploadBuf, pos = world.pos, ns = world.nodeStrain;
+    for (let i = 0; i < N; i++) {
+      const i3 = i * 3, i4 = i * 4;
+      nb[i4]   = pos[i3];
+      nb[i4+1] = pos[i3+1];
+      nb[i4+2] = pos[i3+2];
+      nb[i4+3] = (ns && i < ns.length) ? ns[i] : 0.0;
+    }
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.nodeTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, N, 1, 0, gl.RGBA, gl.FLOAT, nb.subarray(0, N * 4));
+
+    if (this.isFem && world.tetCount > 0) {
+      const T = world.tetCount;
+      if (this.tetNrmUploadBuf.length < T * 3 * 4) this.tetNrmUploadBuf = new Float32Array(T * 3 * 4);
+      const tb = this.tetNrmUploadBuf, tc = world.tetCof;
+      // Row 0 = col0 (c00,c10,c20), Row 1 = col1 (c01,c11,c21), Row 2 = col2 (c02,c12,c22)
+      for (let t = 0; t < T; t++) {
+        const o = t * 9;
+        const r0 = t * 4, r1 = (T + t) * 4, r2 = (2 * T + t) * 4;
+        tb[r0] = tc[o];   tb[r0+1] = tc[o+1]; tb[r0+2] = tc[o+2]; tb[r0+3] = 0;
+        tb[r1] = tc[o+3]; tb[r1+1] = tc[o+4]; tb[r1+2] = tc[o+5]; tb[r1+3] = 0;
+        tb[r2] = tc[o+6]; tb[r2+1] = tc[o+7]; tb[r2+2] = tc[o+8]; tb[r2+3] = 0;
+      }
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this.tetNrmTex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, T, 3, 0, gl.RGBA, gl.FLOAT, tb.subarray(0, T * 3 * 4));
+    }
+  }
+
+  // Offline / On-Demand Baker: runs active 3D FEM or XPBD solver through a 64-frame curb-roll + compression loop
+  // and packs deformed high-poly positions, Nanson normals & 3D strain into real RGBA32F GPU VAT Textures!
+  bakeVat(world, cfg) {
+    if (!this.ready) return false;
+    const F = this.VAT_FRAMES;
+    const W = this.VAT_W;
+    const R = this.vatRowsPerFrame;
+    const H = R * F;
+    const V = this.vertCount;
+    const posTex = new Float32Array(W * H * 4);
+    const nrmTex = new Float32Array(W * H * 4);
+    this.vatMeta = [];
+
+    // Save live world state so baking never disturbs interactive sim
+    const snapPos = new Float32Array(world.pos);
+    const snapPrev = new Float32Array(world.prev);
+    const snapVel = new Float32Array(world.vel);
+    const snapColPos = [...world.collider.pos];
+    const snapColEn = world.collider.enabled;
+    const src = this.isFem ? world.femTyres[0] : world.tyres[0];
+    const snapHub = { hubY: src.hubY, hubVy: src.hubVy, spinAngle: src.spinAngle };
+
+    // Bake configuration: dramatic rolling curb-impact + rebound cycle
+    const bakeCfg = Object.assign({}, cfg, { tyreSpin: Math.abs(cfg.tyreSpin) < 2.5 ? 5.5 : cfg.tyreSpin });
+    world.collider.enabled = true;
+
+    let minX = 1e9, minY = 1e9, minZ = 1e9, maxX = -1e9, maxY = -1e9, maxZ = -1e9;
+    const cIdx = this.cageIdx, cW = this.cageW, ex = this.extra, rNrm = this.restNrm;
+
+    for (let f = 0; f < F; f++) {
+      // Smooth looping curb bump sweep across the tire footprint (u: 0 -> 1)
+      const u = f / F;
+      world.collider.pos[0] = 1.85 - u * 3.70;
+      world.collider.pos[1] = world.groundY + 0.17;
+      world.collider.pos[2] = 0.0;
+
+      // Advance active 3D FEM or XPBD physics 2 frames per baked VAT frame
+      for (let st = 0; st < 2; st++) world.step(1 / 60, bakeCfg, (f * 2 + st) / 60, 0);
+
+      this.vatMeta.push({
+        hubX: src.hubX, hubY: src.hubY, spinAngle: src.spinAngle,
+        colX: world.collider.pos[0], colY: world.collider.pos[1], colZ: world.collider.pos[2]
+      });
+
+      const pos = world.pos, ns = world.nodeStrain, tc = world.tetCof;
+      const frameRowBase = f * R;
+
+      for (let vi = 0; vi < V; vi++) {
+        const o4 = vi * 4, v3 = vi * 3;
+        const i0 = cIdx[o4], i1 = cIdx[o4+1], i2 = cIdx[o4+2], i3 = cIdx[o4+3];
+        const w0 = cW[o4],   w1 = cW[o4+1],   w2 = cW[o4+2],   w3 = cW[o4+3];
+        let wx, wy, wz, nx, ny, nz, stVal = 0.0;
+
+        if (this.isFem) {
+          wx = w0*pos[i0*3]   + w1*pos[i1*3]   + w2*pos[i2*3]   + w3*pos[i3*3];
+          wy = w0*pos[i0*3+1] + w1*pos[i1*3+1] + w2*pos[i2*3+1] + w3*pos[i3*3+1];
+          wz = w0*pos[i0*3+2] + w1*pos[i1*3+2] + w2*pos[i2*3+2] + w3*pos[i3*3+2];
+          stVal = Math.max(0, w0*ns[i0] + w1*ns[i1] + w2*ns[i2] + w3*ns[i3]);
+          const to = ex[o4] * 9;
+          const rx = rNrm[v3], ry = rNrm[v3+1], rz = rNrm[v3+2];
+          nx = tc[to+0]*rx + tc[to+3]*ry + tc[to+6]*rz;
+          ny = tc[to+1]*rx + tc[to+4]*ry + tc[to+7]*rz;
+          nz = tc[to+2]*rx + tc[to+5]*ry + tc[to+8]*rz;
+        } else {
+          const q00x = pos[i0*3], q00y = pos[i0*3+1], q00z = pos[i0*3+2];
+          const q10x = pos[i1*3], q10y = pos[i1*3+1], q10z = pos[i1*3+2];
+          const q11x = pos[i2*3], q11y = pos[i2*3+1], q11z = pos[i2*3+2];
+          const q01x = pos[i3*3], q01y = pos[i3*3+1], q01z = pos[i3*3+2];
+          const bx = w0*q00x + w1*q10x + w2*q11x + w3*q01x;
+          const by = w0*q00y + w1*q10y + w2*q11y + w3*q01y;
+          const bz = w0*q00z + w1*q10z + w2*q11z + w3*q01z;
+          const eUx = 0.5*((q10x-q00x)+(q11x-q01x)), eUy = 0.5*((q10y-q00y)+(q11y-q01y)), eUz = 0.5*((q10z-q00z)+(q11z-q01z));
+          const eVx = 0.5*((q01x-q00x)+(q11x-q10x)), eVy = 0.5*((q01y-q00y)+(q11y-q10y)), eVz = 0.5*((q01z-q00z)+(q11z-q10z));
+          const tl = Math.hypot(eUx, eUy, eUz) || 1;
+          const Tx = eUx/tl, Ty = eUy/tl, Tz = eUz/tl;
+          let Qx = eUy*eVz - eUz*eVy, Qy = eUz*eVx - eUx*eVz, Qz = eUx*eVy - eUy*eVx;
+          const ql = Math.hypot(Qx, Qy, Qz) || 1;
+          Qx /= ql; Qy /= ql; Qz /= ql;
+          const Bx = Qy*Tz - Qz*Ty, By = Qz*Tx - Qx*Tz, Bz = Qx*Ty - Qy*Tx;
+          wx = bx + Qx * ex[o4+3]; wy = by + Qy * ex[o4+3]; wz = bz + Qz * ex[o4+3];
+          nx = Tx*ex[o4] + Bx*ex[o4+1] + Qx*ex[o4+2];
+          ny = Ty*ex[o4] + By*ex[o4+1] + Qy*ex[o4+2];
+          nz = Tz*ex[o4] + Bz*ex[o4+1] + Qz*ex[o4+2];
+          // Estimate local compression strain for heatmap compatibility in XPBD VAT too
+          const dHub = Math.hypot(wx - src.hubX, wy - src.hubY);
+          stVal = Math.max(0, (src.outerR - dHub) * 4.5);
+        }
+        const nl = Math.hypot(nx, ny, nz) || 1;
+        nx /= nl; ny /= nl; nz /= nl;
+
+        const dx = wx - this.restPos[v3], dy = wy - this.restPos[v3+1], dz = wz - this.restPos[v3+2];
+        if (dx < minX) minX = dx; if (dx > maxX) maxX = dx;
+        if (dy < minY) minY = dy; if (dy > maxY) maxY = dy;
+        if (dz < minZ) minZ = dz; if (dz > maxZ) maxZ = dz;
+
+        const col = vi & 255;
+        const row = (vi >> 8) + frameRowBase;
+        const pxIdx = (row * W + col) * 4;
+        posTex[pxIdx] = wx; posTex[pxIdx+1] = wy; posTex[pxIdx+2] = wz; posTex[pxIdx+3] = stVal;
+        nrmTex[pxIdx] = nx; nrmTex[pxIdx+1] = ny; nrmTex[pxIdx+2] = nz; nrmTex[pxIdx+3] = 0.0;
+      }
+    }
+
+    // Restore live physics state cleanly
+    world.pos.set(snapPos); world.prev.set(snapPrev); world.vel.set(snapVel);
+    world.collider.pos = snapColPos; world.collider.enabled = snapColEn;
+    src.hubY = snapHub.hubY; src.hubVy = snapHub.hubVy; src.spinAngle = snapHub.spinAngle;
+
+    // Upload RGBA32F VAT Textures to WebGL2!
+    const gl = this.gl;
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.vatPosTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, H, 0, gl.RGBA, gl.FLOAT, posTex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.vatNrmTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, W, H, 0, gl.RGBA, gl.FLOAT, nrmTex);
+
+    this.vatPosData = posTex;
+    this.vatNrmData = nrmTex;
+    this.vatBounds = { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] };
+    this.vatBaked = true;
+    this.vatSolverTag = this.isFem ? "3D Neo-Hookean FEM" : "Pneumatic XPBD";
+    this.vatFrame = 0.0;
+    this.drawVatPreview(0);
+    return true;
+  }
+
+  getInterpolatedVatPose(frameFloat) {
+    if (!this.vatBaked || this.vatMeta.length === 0) return null;
+    const F = this.vatMeta.length;
+    const fWrap = ((frameFloat % F) + F) % F;
+    const f0 = Math.floor(fWrap) % F;
+    const f1 = (f0 + 1) % F;
+    const t = fWrap - Math.floor(fWrap);
+    const a = this.vatMeta[f0], b = this.vatMeta[f1];
+    // Handle wrap-around curb jump cleanly
+    const colJump = Math.abs(b.colX - a.colX) > 1.5;
+    return {
+      f0, f1, frac: colJump ? 0.0 : t,
+      hubX: a.hubX + (b.hubX - a.hubX) * t,
+      hubY: a.hubY + (b.hubY - a.hubY) * t,
+      spinAngle: a.spinAngle + (b.spinAngle - a.spinAngle) * (colJump ? 0.0 : t),
+      colX: colJump ? a.colX : (a.colX + (b.colX - a.colX) * t),
+      colY: a.colY + (b.colY - a.colY) * t,
+      colZ: a.colZ + (b.colZ - a.colZ) * t
+    };
+  }
+
+  // Render live RGB Displacement + Strain VAT Atlas onto sidebar preview canvas
+  drawVatPreview(activeFrame = 0) {
+    const cv = document.getElementById("vatPreview");
+    if (!cv || !cv.getContext || !this.vatBaked || !this.vatPosData) return;
+    const ctx = cv.getContext("2d");
+    if (!ctx || !ctx.createImageData) return;
+    const W = cv.width, F = this.VAT_FRAMES;
+    const img = ctx.createImageData(W, F);
+    const d = img.data;
+    const bMin = this.vatBounds.min, bMax = this.vatBounds.max;
+    const rx = Math.max(1e-4, bMax[0] - bMin[0]);
+    const ry = Math.max(1e-4, bMax[1] - bMin[1]);
+    const rz = Math.max(1e-4, bMax[2] - bMin[2]);
+    const stepV = Math.max(1, Math.floor(this.vertCount / W));
+    const R = this.vatRowsPerFrame;
+
+    for (let f = 0; f < F; f++) {
+      const fRow = f * R;
+      const isActive = (Math.floor(activeFrame) % F) === f;
+      for (let x = 0; x < W; x++) {
+        const vi = Math.min(this.vertCount - 1, x * stepV);
+        const col = vi & 255, row = (vi >> 8) + fRow;
+        const pIdx = (row * this.VAT_W + col) * 4;
+        const o = (f * W + x) * 4;
+        if (isActive) {
+          d[o] = 255; d[o+1] = 255; d[o+2] = 255; d[o+3] = 255;
+        } else {
+          const dx = (this.vatPosData[pIdx]   - this.restPos[vi*3]   - bMin[0]) / rx;
+          const dy = (this.vatPosData[pIdx+1] - this.restPos[vi*3+1] - bMin[1]) / ry;
+          const dz = (this.vatPosData[pIdx+2] - this.restPos[vi*3+2] - bMin[2]) / rz;
+          const st = Math.min(1.0, this.vatPosData[pIdx+3] * 0.35);
+          d[o]   = Math.max(0, Math.min(255, Math.round((dx * 0.75 + st * 0.45) * 255)));
+          d[o+1] = Math.max(0, Math.min(255, Math.round(dy * 255)));
+          d[o+2] = Math.max(0, Math.min(255, Math.round(dz * 255)));
+          d[o+3] = 255;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  // Export Unreal/Unity-ready quantized RGBA VAT PNG + Bounds JSON metadata
+  exportVat() {
+    if (!this.vatBaked || !this.vatPosData) return null;
+    const W = this.VAT_W, H = this.vatRowsPerFrame * this.VAT_FRAMES;
+    const meta = {
+      format: "Frontier-VAT-RGBA8",
+      solver: this.vatSolverTag,
+      vertexCount: this.vertCount,
+      triangleCount: this.triCount,
+      frameCount: this.VAT_FRAMES,
+      fps: 30,
+      texWidth: W,
+      texHeight: H,
+      rowsPerFrame: this.vatRowsPerFrame,
+      displacementBoundsMin: this.vatBounds.min,
+      displacementBoundsMax: this.vatBounds.max,
+      packing: "col = vIdx & 255; row = (vIdx >> 8) + frame * rowsPerFrame; rgb = normalized (pos - restPos); a = strain/4"
+    };
+    if (typeof document !== "undefined" && document.createElement) {
+      const c = document.createElement("canvas");
+      c.width = W; c.height = H;
+      const ctx = c.getContext && c.getContext("2d");
+      if (ctx && ctx.createImageData) {
+        const img = ctx.createImageData(W, H);
+        const d = img.data;
+        const bMin = this.vatBounds.min, bMax = this.vatBounds.max;
+        const rx = Math.max(1e-4, bMax[0] - bMin[0]);
+        const ry = Math.max(1e-4, bMax[1] - bMin[1]);
+        const rz = Math.max(1e-4, bMax[2] - bMin[2]);
+        for (let f = 0; f < this.VAT_FRAMES; f++) {
+          const fRow = f * this.vatRowsPerFrame;
+          for (let vi = 0; vi < this.vertCount; vi++) {
+            const col = vi & 255, row = (vi >> 8) + fRow;
+            const pIdx = (row * W + col) * 4;
+            d[pIdx]   = Math.max(0, Math.min(255, Math.round(((this.vatPosData[pIdx]   - this.restPos[vi*3]   - bMin[0]) / rx) * 255)));
+            d[pIdx+1] = Math.max(0, Math.min(255, Math.round(((this.vatPosData[pIdx+1] - this.restPos[vi*3+1] - bMin[1]) / ry) * 255)));
+            d[pIdx+2] = Math.max(0, Math.min(255, Math.round(((this.vatPosData[pIdx+2] - this.restPos[vi*3+2] - bMin[2]) / rz) * 255)));
+            d[pIdx+3] = Math.max(0, Math.min(255, Math.round(Math.min(1, this.vatPosData[pIdx+3] * 0.25) * 255)));
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+        if (c.toDataURL) {
+          const dl = (href, name) => {
+            const a = document.createElement("a");
+            a.href = href; a.download = name; a.click();
+          };
+          dl(c.toDataURL("image/png"), "frontier_tire_vat.png");
+          dl("data:application/json;charset=utf-8," + encodeURIComponent(JSON.stringify(meta, null, 2)), "frontier_tire_vat.json");
+        }
+      }
+    }
+    return meta;
+  }
+
+  draw(cam, modeInt, showHeatmap, vatPose) {
+    if (!this.ready) return;
+    const gl = this.gl;
+    gl.useProgram(hpProgram);
+    gl.uniformMatrix4fv(this.u.vp, false, cam.vp);
+    gl.uniform1i(this.u.mode, modeInt);
+    gl.uniform1i(this.u.nodeTex, 0);
+    gl.uniform1i(this.u.tetNrmTex, 1);
+    gl.uniform1i(this.u.vatPosTex, 2);
+    gl.uniform1i(this.u.vatNrmTex, 3);
+    gl.uniform1i(this.u.vatRows, this.vatRowsPerFrame);
+    gl.uniform1i(this.u.vatF0, vatPose ? vatPose.f0 : 0);
+    gl.uniform1i(this.u.vatF1, vatPose ? vatPose.f1 : 0);
+    gl.uniform1f(this.u.vatFrac, vatPose ? vatPose.frac : 0.0);
+    gl.uniform3fv(this.u.cam, cam.eye);
+    gl.uniform3f(this.u.sun, 0.58, 0.86, 0.48);
+    gl.uniform3f(this.u.top, 0.58, 0.68, 0.85);
+    gl.uniform3f(this.u.bot, 0.18, 0.20, 0.24);
+    gl.uniform1f(this.u.heatmap, showHeatmap ? 1.0 : 0.0);
+
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, this.nodeTex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.tetNrmTex);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, this.vatPosTex);
+    gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, this.vatNrmTex);
+
+    gl.bindVertexArray(this.vao);
+    gl.drawElements(gl.TRIANGLES, this.indexCount, gl.UNSIGNED_INT, 0);
+    gl.bindVertexArray(null);
+  }
+}
+
+// =================================================================================================
 // 6. STATE, UI BINDINGS & INTERACTIVE RAYCASTING (Orbit / Grab & Pluck / Move Collider / Snip)
 // =================================================================================================
 const world = new XpbdWorld();
 const meshBuilder = new DynamicMeshBuilder();
+const highPolyTire = new HighPolyTireGpu(gl);
 
 const cfg = {
   substeps: 6,
@@ -2590,6 +3600,7 @@ const cfg = {
   femYoung: 2.4,
   femPoisson: 0.44,
   femHeatmap: false,
+  tireDeformMode: "cage", // "cage" (Live GPU High-Poly), "vat" (Baked RGBA32F VAT, 0-CPU!), "coarse" (Raw physics skin)
   showMesh: true,
   showParticles: false,
   showConstraints: false,
@@ -2635,6 +3646,26 @@ function syncSlidersFromCfg() {
   if (hm) hm.checked = !!cfg.femHeatmap;
 }
 
+function syncVatUi() {
+  const m = cfg.tireDeformMode;
+  const setA = (id, on) => { const e = document.getElementById(id); if (e && e.classList) e.classList.toggle("active", on); };
+  setA("btnModeCage", m === "cage");
+  setA("btnModeVat", m === "vat");
+  setA("btnModeCoarse", m === "coarse");
+  const pb = document.getElementById("vatPlaybackBox");
+  if (pb) pb.style.display = (m === "vat" && highPolyTire.vatBaked) ? "flex" : "none";
+  const info = document.getElementById("vatInfo");
+  if (info && highPolyTire.vatBaked) {
+    const H = highPolyTire.vatRowsPerFrame * highPolyTire.VAT_FRAMES;
+    info.textContent = `RGBA32F ${highPolyTire.VAT_W}x${H} · ${highPolyTire.vatFrames || highPolyTire.VAT_FRAMES}f · ${highPolyTire.vatSolverTag} · 0.00ms CPU`;
+  }
+  const hasAnyTyre = (world.tyres.length > 0 || world.femTyres.length > 0);
+  if (hasAnyTyre) {
+    const modeLabel = (m === "vat") ? "Baked RGBA32F VAT (0-CPU GPU)" : (m === "cage" ? "Shared High-Poly GPU Cage" : "Coarse Physics Cage");
+    document.getElementById("hudTitle").textContent = `${activeScene.name} · ${modeLabel}`;
+  }
+}
+
 function loadScene(sc) {
   activeScene = sc;
   Object.assign(cfg, sc.defaults);
@@ -2645,6 +3676,8 @@ function loadScene(sc) {
   sc.build(world);
   world.collider.enabled = cfg.showCollider;
   world.finalize();
+  highPolyTire.bindToWorld(world);
+  if (cfg.tireDeformMode === "vat") cfg.tireDeformMode = "cage";
   simTime = 0.0;
   windPulse = 0.0;
   const tp = document.getElementById("tyrePanel");
@@ -2653,6 +3686,7 @@ function loadScene(sc) {
   const fc = document.getElementById("femControls");
   if (fc) fc.style.display = (world.femTyres.length > 0) ? "flex" : "none";
   document.getElementById("hudTitle").textContent = sc.name + (world.tetCount > 0 ? " · 3D Volumetric Neo-Hookean FEM" : " · XPBD Particle-Driven Mesh");
+  syncVatUi();
   document.querySelectorAll(".scene-btn").forEach(b => b.classList.toggle("active", b.dataset.id === sc.id));
 }
 
@@ -2693,10 +3727,57 @@ document.getElementById("btnTyreDrop").onclick = () => {
   for (const ft of world.femTyres) liftTire(ft, ft.sectors * ft.profile * 2);
 };
 document.getElementById("btnTyreCurb").onclick = () => {
+  if (cfg.tireDeformMode === "vat") { cfg.tireDeformMode = "cage"; syncVatUi(); }
   cfg.showCollider = true;
   document.getElementById("cCollider").checked = true;
   world.collider.enabled = true;
   curbAnim = 1.0;
+};
+
+// High-Poly GPU Cage / Baked RGBA32F VAT controls
+document.getElementById("btnModeCage").onclick = () => { cfg.tireDeformMode = "cage"; syncVatUi(); };
+document.getElementById("btnModeCoarse").onclick = () => { cfg.tireDeformMode = "coarse"; syncVatUi(); };
+document.getElementById("btnModeVat").onclick = () => {
+  if (!highPolyTire.vatBaked && highPolyTire.ready) highPolyTire.bakeVat(world, cfg);
+  if (highPolyTire.vatBaked) {
+    cfg.tireDeformMode = "vat";
+    highPolyTire.vatPlaying = true;
+    document.getElementById("btnVatPlay").textContent = "Pause VAT";
+    syncVatUi();
+  }
+};
+document.getElementById("btnBakeVat").onclick = () => {
+  if (!highPolyTire.ready) return;
+  const t0 = performance.now();
+  highPolyTire.bakeVat(world, cfg);
+  const ms = Math.round(performance.now() - t0);
+  cfg.tireDeformMode = "vat";
+  highPolyTire.vatPlaying = true;
+  document.getElementById("btnVatPlay").textContent = "Pause VAT";
+  syncVatUi();
+  const info = document.getElementById("vatInfo");
+  if (info) info.textContent = `Baked 64f RGBA32F VAT in ${ms}ms (${highPolyTire.vatSolverTag}) · 0-CPU GPU`;
+};
+document.getElementById("btnExportVat").onclick = () => {
+  if (!highPolyTire.vatBaked && highPolyTire.ready) highPolyTire.bakeVat(world, cfg);
+  highPolyTire.exportVat();
+};
+document.getElementById("sVatFrame").oninput = e => {
+  highPolyTire.vatPlaying = false;
+  highPolyTire.vatFrame = Number(e.target.value);
+  document.getElementById("btnVatPlay").textContent = "Play VAT";
+  document.getElementById("vVatFrame").textContent = `${Math.floor(highPolyTire.vatFrame)} / ${highPolyTire.VAT_FRAMES - 1}`;
+  highPolyTire.drawVatPreview(highPolyTire.vatFrame);
+};
+document.getElementById("btnVatPlay").onclick = () => {
+  highPolyTire.vatPlaying = !highPolyTire.vatPlaying;
+  document.getElementById("btnVatPlay").textContent = highPolyTire.vatPlaying ? "Pause VAT" : "Play VAT";
+};
+document.getElementById("btnVatSpeed").onclick = () => {
+  const speeds = [0.25, 0.5, 1.0, 1.5, 2.0];
+  const next = speeds[(speeds.indexOf(highPolyTire.vatSpeed) + 1) % speeds.length];
+  highPolyTire.vatSpeed = next;
+  document.getElementById("btnVatSpeed").textContent = `Speed: ${next.toFixed(2).replace(/0$/, "")}x`;
 };
 
 document.getElementById("cMesh").onchange = e => cfg.showMesh = e.target.checked;
@@ -2886,17 +3967,35 @@ function frame(now) {
   if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
   gl.viewport(0, 0, cw, ch);
 
-  // Step XPBD particle solver
+  // Step XPBD / 3D FEM particle solver — COMPLETELY BYPASSED (0.00 ms CPU!) in Baked VAT mode!
   simTime += dt;
   windPulse *= Math.exp(-dt * 2.2);
-  if (curbAnim > 0.0 && (world.tyres.length > 0 || world.femTyres.length > 0)) {
-    curbAnim = Math.max(0.0, curbAnim - dt * 0.28);
-    const u = 1.0 - curbAnim; // 0 -> 1 sweep across bottom of tire
-    world.collider.pos[0] = 1.75 - u * 3.5;
-    world.collider.pos[1] = world.groundY + 0.14;
-    world.collider.pos[2] = 0.0;
+  const isTireScene = (world.tyres.length > 0 || world.femTyres.length > 0);
+  const useVatPlayback = (isTireScene && cfg.tireDeformMode === "vat" && highPolyTire.vatBaked);
+  const useLiveGpuCage = (isTireScene && cfg.tireDeformMode === "cage" && highPolyTire.ready);
+  let vatPose = null;
+
+  if (useVatPlayback) {
+    if (highPolyTire.vatPlaying) {
+      highPolyTire.vatFrame = (highPolyTire.vatFrame + dt * 30.0 * highPolyTire.vatSpeed) % highPolyTire.VAT_FRAMES;
+      const sf = document.getElementById("sVatFrame");
+      if (sf) sf.value = highPolyTire.vatFrame;
+      const vf = document.getElementById("vVatFrame");
+      if (vf) vf.textContent = `${Math.floor(highPolyTire.vatFrame)} / ${highPolyTire.VAT_FRAMES - 1}`;
+      highPolyTire.drawVatPreview(highPolyTire.vatFrame);
+    }
+    vatPose = highPolyTire.getInterpolatedVatPose(highPolyTire.vatFrame);
+  } else {
+    if (curbAnim > 0.0 && isTireScene) {
+      curbAnim = Math.max(0.0, curbAnim - dt * 0.28);
+      const u = 1.0 - curbAnim; // 0 -> 1 sweep across bottom of tire
+      world.collider.pos[0] = 1.75 - u * 3.5;
+      world.collider.pos[1] = world.groundY + 0.14;
+      world.collider.pos[2] = 0.0;
+    }
+    world.step(dt, cfg, simTime, windPulse);
+    if (useLiveGpuCage) highPolyTire.uploadLiveCage(world);
   }
-  world.step(dt, cfg, simTime, windPulse);
 
   // Update camera matrices
   const cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
@@ -2940,9 +4039,10 @@ function frame(now) {
   gl.drawArrays(gl.LINES, 0, gridData.length / 7);
   gl.disable(gl.BLEND);
 
-  // 3. Skin & Draw 3D Lit Procedural Meshes driven by live XPBD particles!
+  // 3. Skin & Draw 3D Lit Procedural Meshes + Shared High-Poly GPU Tire (Live Cage or Baked RGBA32F VAT!)
+  let gpuTireTris = 0;
   if (cfg.showMesh) {
-    meshBuilder.buildFromWorld(world, simTime, cfg.showCollider);
+    meshBuilder.buildFromWorld(world, simTime, cfg.showCollider, vatPose);
     gl.useProgram(meshProgram);
     gl.uniformMatrix4fv(uMeshVP, false, cam.vp);
     gl.uniform3fv(uMeshCam, cam.eye);
@@ -2960,6 +4060,15 @@ function frame(now) {
     gl.bindBuffer(gl.ARRAY_BUFFER, meshVbo);
     gl.bufferData(gl.ARRAY_BUFFER, meshBuilder.vBuf.subarray(0, meshBuilder.vCount * 12), gl.DYNAMIC_DRAW);
     gl.drawArrays(gl.TRIANGLES, 0, meshBuilder.vCount);
+
+    // Draw Shared ~12,032-tri High-Poly Sculpted Tire on GPU (Live 3D FEM/XPBD Cage OR 0-CPU Baked VAT!)
+    if (useVatPlayback) {
+      highPolyTire.draw(cam, 2, cfg.femHeatmap, vatPose);
+      gpuTireTris = highPolyTire.triCount;
+    } else if (useLiveGpuCage) {
+      highPolyTire.draw(cam, highPolyTire.isFem ? 0 : 1, cfg.femHeatmap, null);
+      gpuTireTris = highPolyTire.triCount;
+    }
   } else {
     meshBuilder.clear();
   }
@@ -3037,9 +4146,11 @@ function frame(now) {
   }
 
   // Update HUD stats
-  document.getElementById("hPts").textContent = world.n;
-  document.getElementById("hCons").textContent = world.tetCount > 0 ? `${world.tetCount} FEM Tets` : (world.distCons.length + world.bendCons.length);
-  document.getElementById("hTris").textContent = Math.floor(meshBuilder.vCount / 3);
+  document.getElementById("hPts").textContent = useVatPlayback ? "0 (VAT)" : world.n;
+  document.getElementById("hCons").textContent = useVatPlayback
+    ? `VAT ${highPolyTire.VAT_FRAMES}f`
+    : (world.tetCount > 0 ? `${world.tetCount} FEM Tets` : (world.distCons.length + world.bendCons.length));
+  document.getElementById("hTris").textContent = Math.floor(meshBuilder.vCount / 3) + gpuTireTris;
   document.getElementById("hTorn").textContent = world.tornCount;
 }
 requestAnimationFrame(frame);
