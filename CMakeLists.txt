@@ -1190,6 +1190,9 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/SimulationSpace/SimulationTriggerRouter.cpp
     Engine/SimulationSpace/SimulationEventTimeline.cpp
     Engine/SimulationSpace/SimulationSpatialQuery.cpp
+    Engine/SimulationSpace/SimulationReplayRecorder.cpp
+    Engine/SimulationSpace/SimulationAcousticBridge.cpp
+    Engine/SimulationSpace/SimulationAeroBuoyancyBridge.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
@@ -1509,6 +1512,7 @@ if(BUILD_TESTING)
     frontier_register_exhibit(SimulationPhaseIValidation                Exhibits/SimulationPhaseIValidation.cpp)
     frontier_register_exhibit(SimulationPhaseJValidation                Exhibits/SimulationPhaseJValidation.cpp)
     frontier_register_exhibit(SimulationPhaseKValidation                Exhibits/SimulationPhaseKValidation.cpp)
+    frontier_register_exhibit(SimulationPhaseLValidation                Exhibits/SimulationPhaseLValidation.cpp)
     frontier_register_exhibit(GeometryNetworkValidation                 Exhibits/GeometryNetworkValidation.cpp)
     frontier_register_exhibit(GeometryCompletionValidation              Exhibits/GeometryCompletionValidation.cpp)
     frontier_register_exhibit(VisibilityRasterValidation                Exhibits/VisibilityRasterValidation.cpp)

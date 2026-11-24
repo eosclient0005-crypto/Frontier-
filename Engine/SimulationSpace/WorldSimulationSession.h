@@ -15,11 +15,14 @@
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/SimulationSpace/ComponentClassSimulationAssembler.h"
 #include "Engine/SimulationSpace/ComponentSimulationPreviewDriver.h"
+#include "Engine/SimulationSpace/SimulationAcousticBridge.h"
+#include "Engine/SimulationSpace/SimulationAeroBuoyancyBridge.h"
 #include "Engine/SimulationSpace/SimulationBudgetGovernor.h"
 #include "Engine/SimulationSpace/SimulationCheckpointBuffer.h"
 #include "Engine/SimulationSpace/SimulationEventTimeline.h"
 #include "Engine/SimulationSpace/SimulationGpuRenderFeed.h"
 #include "Engine/SimulationSpace/SimulationInteractionBridge.h"
+#include "Engine/SimulationSpace/SimulationReplayRecorder.h"
 #include "Engine/SimulationSpace/SimulationSpatialQuery.h"
 #include "Engine/SimulationSpace/SimulationTelemetryProfiler.h"
 #include "Engine/SimulationSpace/SimulationTriggerRouter.h"
@@ -108,6 +111,19 @@ public:
     [[nodiscard]] const SimulationTriggerRouter& InspectTriggerRouter() const noexcept { return TriggerRouter_; }
     [[nodiscard]] uint32_t                       EvaluateTriggers(const TriggerDomainPool& triggerPool) noexcept;
 
+    /// Deterministic interactive input recorder / replayer (0 heap allocations during record & playback).
+    [[nodiscard]] SimulationReplayRecorder&       AccessReplayRecorder() noexcept { return ReplayRecorder_; }
+    [[nodiscard]] const SimulationReplayRecorder& InspectReplayRecorder() const noexcept { return ReplayRecorder_; }
+
+    /// Extracts zero-allocation coupled AudioSpace & haptic cues relative to `listenerWorldMeters`.
+    [[nodiscard]] SimulationAcousticPacket ExtractAcousticPacket(const std::array<float, 3>& listenerWorldMeters) noexcept;
+
+    /// Integrates Fluid aerodynamic drag + thermal buoyancy lift + ForceFields onto `physicsPool` (0 heap allocations).
+    [[nodiscard]] AeroBuoyancyStepReport ApplyAeroBuoyancy(
+        PhysicsDomainPool& physicsPool,
+        float deltaTimeSeconds,
+        const AeroBuoyancyParameters& params = {}) const noexcept;
+
     /// Zero-allocation interactive manipulation & multi-domain spatial probe helpers.
     [[nodiscard]] SoftBodyGrabHandle       PickSoftBodyPoint(const std::array<float, 3>& rayOrigin, const std::array<float, 3>& rayDir, float maxDistM = 0.25f) const noexcept;
     [[nodiscard]] bool                     BeginSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept;
@@ -164,6 +180,8 @@ private:
     SimulationTelemetryProfiler                     Profiler_       {};
     SimulationEventTimeline                         EventTimeline_  {};
     SimulationTriggerRouter                         TriggerRouter_  {};
+    SimulationReplayRecorder                        ReplayRecorder_ {};
+    SimulationAcousticBridge                        AcousticBridge_ {};
 };
 
 } // namespace Frontier::SimulationSpace

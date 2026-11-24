@@ -133,6 +133,7 @@ void WorldSimulationSession::Tick(double deltaSeconds, const std::array<float, 3
     const auto t0 = std::chrono::steady_clock::now();
     Coordinator_->AssignCameraWorldPosition(cameraWorldPos);
     const double clampedDt = std::clamp(deltaSeconds, 0.0005, 0.05);
+    (void)ReplayRecorder_.ApplyPlaybackForTick(Coordinator_->InspectTelemetry().CompletedTicks, *Coordinator_);
     Sequence_->Tick(clampedDt);
     (void)EventTimeline_.EvaluateUpToTime(Coordinator_->InspectTelemetry().AccumulatedSeconds, *Coordinator_);
     const auto t1 = std::chrono::steady_clock::now();
@@ -168,6 +169,7 @@ bool WorldSimulationSession::StepSingleTick(
     Coordinator_->AssignCameraWorldPosition(cameraWorldPos);
     const double clampedDt = std::clamp(fixedDeltaSeconds, 0.0005, 0.05);
     const auto t0 = std::chrono::steady_clock::now();
+    (void)ReplayRecorder_.ApplyPlaybackForTick(Coordinator_->InspectTelemetry().CompletedTicks, *Coordinator_);
     Sequence_->Tick(clampedDt);
     (void)EventTimeline_.EvaluateUpToTime(Coordinator_->InspectTelemetry().AccumulatedSeconds, *Coordinator_);
     const auto t1 = std::chrono::steady_clock::now();
@@ -238,19 +240,36 @@ SoftBodyGrabHandle WorldSimulationSession::PickSoftBodyPoint(
 
 bool WorldSimulationSession::BeginSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept
 {
-    return Coordinator_ && SimulationInteractionBridge::BeginSoftBodyGrab(*Coordinator_, handle);
+    if (!Coordinator_) return false;
+    const bool ok = SimulationInteractionBridge::BeginSoftBodyGrab(*Coordinator_, handle);
+    if (ok && ReplayRecorder_.IsRecording())
+    {
+        (void)ReplayRecorder_.RecordSoftBodyGrabBegin(Coordinator_->InspectTelemetry().CompletedTicks, handle);
+    }
+    return ok;
 }
 
 bool WorldSimulationSession::MoveSoftBodyGrab(
     const SoftBodyGrabHandle& handle,
     const std::array<float, 3>& targetMeters) noexcept
 {
-    return Coordinator_ && SimulationInteractionBridge::MoveSoftBodyGrab(*Coordinator_, handle, targetMeters);
+    if (!Coordinator_) return false;
+    const bool ok = SimulationInteractionBridge::MoveSoftBodyGrab(*Coordinator_, handle, targetMeters);
+    if (ok && ReplayRecorder_.IsRecording())
+    {
+        (void)ReplayRecorder_.RecordSoftBodyGrabMove(Coordinator_->InspectTelemetry().CompletedTicks, handle, targetMeters);
+    }
+    return ok;
 }
 
 void WorldSimulationSession::ReleaseSoftBodyGrab(const SoftBodyGrabHandle& handle) noexcept
 {
-    if (Coordinator_) SimulationInteractionBridge::ReleaseSoftBodyGrab(*Coordinator_, handle);
+    if (!Coordinator_) return;
+    SimulationInteractionBridge::ReleaseSoftBodyGrab(*Coordinator_, handle);
+    if (ReplayRecorder_.IsRecording())
+    {
+        (void)ReplayRecorder_.RecordSoftBodyGrabRelease(Coordinator_->InspectTelemetry().CompletedTicks, handle);
+    }
 }
 
 uint32_t WorldSimulationSession::InjectFluidBrushStroke(
@@ -261,7 +280,12 @@ uint32_t WorldSimulationSession::InjectFluidBrushStroke(
     float temp) noexcept
 {
     if (!Coordinator_) return 0u;
-    return SimulationInteractionBridge::InjectFluidBrushStroke(*Coordinator_, centreMeters, velocityMps, radiusMeters, density, temp);
+    if (ReplayRecorder_.IsRecording())
+    {
+        (void)ReplayRecorder_.RecordFluidBrushStroke(
+            Coordinator_->InspectTelemetry().CompletedTicks, centreMeters, velocityMps, density, temp, radiusMeters);
+    }
+    return SimulationInteractionBridge::InjectFluidBrushStroke(*Coordinator_, centreMeters, velocityMps, density, temp, radiusMeters);
 }
 
 RadialBlastReport WorldSimulationSession::InjectRadialBlastImpulse(
@@ -271,7 +295,29 @@ RadialBlastReport WorldSimulationSession::InjectRadialBlastImpulse(
     float fluidTempBoost) noexcept
 {
     if (!Coordinator_) return {};
+    if (ReplayRecorder_.IsRecording())
+    {
+        (void)ReplayRecorder_.RecordRadialBlast(
+            Coordinator_->InspectTelemetry().CompletedTicks, centreMeters, radiusMeters, peakSpeedMps, fluidTempBoost);
+    }
+    AcousticBridge_.NotifyRadialBlast(centreMeters, peakSpeedMps);
     return SimulationInteractionBridge::InjectRadialBlastImpulse(*Coordinator_, centreMeters, radiusMeters, peakSpeedMps, fluidTempBoost);
+}
+
+SimulationAcousticPacket WorldSimulationSession::ExtractAcousticPacket(
+    const std::array<float, 3>& listenerWorldMeters) noexcept
+{
+    if (!Coordinator_) return {};
+    return AcousticBridge_.ExtractPacket(*Coordinator_, listenerWorldMeters);
+}
+
+AeroBuoyancyStepReport WorldSimulationSession::ApplyAeroBuoyancy(
+    PhysicsDomainPool& physicsPool,
+    float deltaTimeSeconds,
+    const AeroBuoyancyParameters& params) const noexcept
+{
+    if (!Coordinator_) return {};
+    return SimulationAeroBuoyancyBridge::StepPool(*Coordinator_, physicsPool, deltaTimeSeconds, params);
 }
 
 SimulationPointProbe WorldSimulationSession::SampleWorldPoint(
