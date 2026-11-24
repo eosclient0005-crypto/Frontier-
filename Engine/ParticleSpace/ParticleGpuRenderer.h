@@ -10,6 +10,7 @@
 //                                                        INCLUDES
 //------------------------------------------------------------------------------------------------------------------------
 
+#include "Engine/ParticleSpace/CarrierSolidRegistry.h"
 #include "Engine/ParticleSpace/ParticleCloudTypes.h"
 #include "Engine/ParticleSpace/ParticleGpuSimulation.h"
 
@@ -72,6 +73,66 @@ struct ParticleRibbonDrawCall
     uint32_t                   VertexCount  = 0u;
     bool                       IsHaloCall   = false;
     ParticleRibbonUniformBlock UniformBlock {};
+};
+
+inline constexpr std::array<float, 3> kDefaultBackingColour { 0.62f, 0.86f, 1.0f }; // ParticleSimulation.js L69
+inline constexpr uint32_t             kMaximumCarrierVertices = 720000u;             // ParticleSimulation.js L423
+
+/// Matches ParticleCarrierSolidUniformBlock in ParticleCarrierSolidRasterization.slang byte-for-byte (544 bytes, 16-byte aligned).
+struct alignas(16) ParticleCarrierSolidUniformBlock
+{
+    ParticleShapeUniformBlock Shape {};
+    ParticleShadeUniformBlock Shade {};
+    std::array<float, 16>     ViewProjection          { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+    std::array<float, 4>      CameraPositionFocal     { 0.0f, 0.0f, 10.0f, 940.0f };
+    std::array<float, 4>      CameraForwardPixelRatio { 0.0f, 0.0f, -1.0f, 1.0f };
+    std::array<float, 4>      SolidCountsStride       { 3.0f, 1.0f, 1.0f, 0.0f };
+    std::array<float, 4>      BackingParams           { 0.0f, 0.5f, 0.0f, 0.0f };
+    std::array<float, 4>      SizeParams              { 3.0f, 1.0f, 0.3f, 1.0f };
+    std::array<float, 4>      SpinTiltRoughMetal      { 1.2f, 0.15f, 0.35f, 0.0f };
+    std::array<float, 4>      BackingColourGlow       { 0.62f, 0.86f, 1.0f, 0.0f };
+};
+static_assert(sizeof(ParticleCarrierSolidUniformBlock) == 544u, "ParticleCarrierSolidUniformBlock must be 544 bytes");
+
+enum class ParticleSolidTopologyOrdinal : uint32_t
+{
+    TriangleList = 0u,
+    LineList     = 1u,
+};
+
+struct ParticleCarrierSolidDrawCall
+{
+    std::string                      NodeId          {};
+    std::string                      SolidName       {};
+    std::string                      CustomSolidId   {};
+    ParticleSolidTopologyOrdinal     Topology        = ParticleSolidTopologyOrdinal::TriangleList;
+    ParticleBlendOrdinal             Blend           = ParticleBlendOrdinal::Alpha;
+    bool                             EnableDepthTest = false;
+    bool                             WriteDepth      = false;
+    bool                             IsBackingCall   = false;
+    uint32_t                         BackingMode     = 0u; // 0=carrier, 1=ObsidianGlossy, 2=BrushedChrome, 3=GhostWireframe
+    uint32_t                         CarrierStride   = 1u;
+    uint32_t                         InstanceCount   = 0u;
+    uint32_t                         VertexCount     = 0u;
+    ParticleCarrierSolidUniformBlock UniformBlock    {};
+};
+
+struct CarrierSolidVertexCpuResult
+{
+    std::array<float, 3> WorldPos    { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> WorldNormal { 0.0f, 1.0f, 0.0f };
+    std::array<float, 3> LocalPos    { 0.0f, 0.0f, 0.0f };
+    std::array<float, 3> Colour      { 1.0f, 1.0f, 1.0f };
+    float                Alpha       = 0.0f;
+    float                Ridge       = 0.0f;
+    bool                 Culled      = false;
+};
+
+struct CarrierSolidFragmentCpuResult
+{
+    std::array<float, 3> Rgb       { 0.0f, 0.0f, 0.0f };
+    float                Alpha     = 0.0f;
+    bool                 Discarded = false;
 };
 
 struct ParticleCameraView
@@ -199,11 +260,42 @@ void ComputeSpriteDofMetricsCpu(
     uint32_t particleIndex,
     int32_t k) noexcept;
 
+/// Populates ParticleCarrierSolidUniformBlock for either a backing surface (mode 1..3) or instanced Object3D carrier (mode 0).
+[[nodiscard]] ParticleCarrierSolidUniformBlock BuildParticleCarrierSolidUniforms(
+    const ParticleCloudParameters& params,
+    const ParticleCloudStateRecord& record,
+    uint32_t solidVertexCount,
+    uint32_t solidTriangleCount,
+    uint32_t carrierStride,
+    bool isBacking,
+    bool isWire,
+    uint32_t backingMode,
+    const ParticleCameraView& camera,
+    float simulationTimeSeconds,
+    float regionHeightMeters,
+    const std::array<float, 3>& backingColour = kDefaultBackingColour) noexcept;
+
+/// Bit-accurate CPU mirror of ParticleCarrierSolidRasterization.slang::ParticleCarrierSolidVertexEntry.
+[[nodiscard]] CarrierSolidVertexCpuResult EvaluateCarrierSolidVertexCpu(
+    const ParticleCarrierSolidUniformBlock& uniforms,
+    std::span<const ParticleStateGpuRecord> states,
+    std::span<const float> anchorTexelRgba,
+    std::span<const float> solidTexelRgba,
+    uint32_t vertexId) noexcept;
+
+/// Bit-accurate CPU mirror of ParticleCarrierSolidRasterization.slang::ParticleCarrierSolidFragmentEntry (modes 0..3).
+[[nodiscard]] CarrierSolidFragmentCpuResult EvaluateCarrierSolidFragmentCpu(
+    const ParticleCarrierSolidUniformBlock& uniforms,
+    const CarrierSolidVertexCpuResult& vertex) noexcept;
+
+/// Returns true when any active cloud needs a depth buffer clear (ParticleSimulation.js L566-L567).
+[[nodiscard]] bool RequiresParticleDepthBuffer(std::span<const ParticleCloudNode> clouds) noexcept;
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                PARTICLEGPURENDERER
 //------------------------------------------------------------------------------------------------------------------------
 
-/// Plans sprite, streak, ribbon, and additive halo GPU render calls across all visible particle clouds.
+/// Plans sprite, streak, ribbon, backing surface, and 3D carrier GPU render calls across all visible particle clouds.
 class ParticleGpuRenderer
 {
 public:
@@ -223,6 +315,15 @@ public:
         const ParticleCameraView& camera,
         float simulationTimeSeconds,
         float regionHeightMeters) const;
+
+    [[nodiscard]] std::vector<ParticleCarrierSolidDrawCall> BuildCarrierSolidRenderCalls(
+        std::span<const ParticleCloudNode> clouds,
+        const ParticleGpuSimulation& simulation,
+        const CarrierSolidRegistry& solidRegistry,
+        const ParticleCameraView& camera,
+        float simulationTimeSeconds,
+        float regionHeightMeters,
+        const std::array<float, 3>& backingColour = kDefaultBackingColour) const;
 };
 
 } // namespace Frontier::ParticleSpace

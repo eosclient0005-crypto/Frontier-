@@ -120,6 +120,25 @@ constexpr float kTwoPi = 6.2831853f;
     return { anchorRgba[base + 4u], anchorRgba[base + 5u], anchorRgba[base + 6u] };
 }
 
+[[nodiscard]] Vec3f Normalise3(const Vec3f& v) noexcept
+{
+    const float len = std::sqrt(Dot3(v, v));
+    return (len > 1.0e-7f) ? Mul3(v, 1.0f / len) : Vec3f { 0.0f, 1.0f, 0.0f };
+}
+
+[[nodiscard]] float Hash31F(const Vec3f& p) noexcept
+{
+    const float h = std::sin(p[0] * 127.1f + p[1] * 311.7f + p[2] * 74.7f) * 43758.5453123f;
+    return FractF(h);
+}
+
+void ComputeShapeBasis3(const Vec3f& axis, Vec3f& outT, Vec3f& outB) noexcept
+{
+    const Vec3f helper = (std::fabs(axis[1]) < 0.95f) ? Vec3f { 0.0f, 1.0f, 0.0f } : Vec3f { 1.0f, 0.0f, 0.0f };
+    outT = Normalise3(Cross3(helper, axis));
+    outB = Cross3(axis, outT);
+}
+
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -900,6 +919,382 @@ std::vector<ParticleRibbonDrawCall> ParticleGpuRenderer::BuildRibbonRenderCalls(
             mainBlock
         });
     }
+    return calls;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                      CARRIER SOLID & BACKING SURFACE (S12)
+//------------------------------------------------------------------------------------------------------------------------
+
+ParticleCarrierSolidUniformBlock BuildParticleCarrierSolidUniforms(
+    const ParticleCloudParameters& params,
+    const ParticleCloudStateRecord& record,
+    const uint32_t solidVertexCount,
+    const uint32_t solidTriangleCount,
+    const uint32_t carrierStride,
+    const bool isBacking,
+    const bool isWire,
+    const uint32_t backingMode,
+    const ParticleCameraView& camera,
+    const float simulationTimeSeconds,
+    const float regionHeightMeters,
+    const std::array<float, 3>& backingColour) noexcept
+{
+    // Reference: ParticleSimulation.js L376-L426
+    ParticleCarrierSolidUniformBlock block {};
+    block.Shape = BuildParticleShapeUniforms(params, record.TextureSide, record.AnchorTexels.Width, record.AnchorTexels.Count);
+    block.Shade = BuildParticleShadeUniforms(params, simulationTimeSeconds, regionHeightMeters);
+    block.ViewProjection = camera.ViewProjection;
+
+    const float viewH = std::max(1.0f, camera.ViewportHeightPx * camera.PixelRatio);
+    const float focalPixels = viewH / (2.0f * std::tan(std::max(0.05f, camera.VerticalFovRad) * 0.5f));
+    const float yawRad = params.SolidYawDegrees * (kPi / 180.0f);
+
+    block.CameraPositionFocal     = { camera.CameraPosition[0], camera.CameraPosition[1], camera.CameraPosition[2], focalPixels };
+    block.CameraForwardPixelRatio = { camera.CameraForward[0], camera.CameraForward[1], camera.CameraForward[2], camera.PixelRatio };
+    block.SolidCountsStride       = {
+        static_cast<float>(std::max(3u, solidVertexCount)),
+        static_cast<float>(std::max(1u, solidTriangleCount)),
+        static_cast<float>(std::max(1u, carrierStride)),
+        isWire ? 1.0f : 0.0f
+    };
+    block.BackingParams = {
+        isBacking ? 1.0f : 0.0f,
+        std::max(0.05f, params.Radius),
+        yawRad,
+        static_cast<float>(backingMode)
+    };
+    block.SizeParams = {
+        params.SizeStart,
+        params.SizeEnd,
+        params.SizeRandom,
+        static_cast<float>(params.SizeMode)
+    };
+    block.SpinTiltRoughMetal = {
+        params.SolidSpin,
+        params.SolidTilt,
+        params.SolidRoughness,
+        params.SolidMetallic
+    };
+    block.BackingColourGlow = {
+        backingColour[0],
+        backingColour[1],
+        backingColour[2],
+        params.SolidGlow
+    };
+    return block;
+}
+
+CarrierSolidVertexCpuResult EvaluateCarrierSolidVertexCpu(
+    const ParticleCarrierSolidUniformBlock& uniforms,
+    const std::span<const ParticleStateGpuRecord> states,
+    const std::span<const float> anchorTexelRgba,
+    const std::span<const float> solidTexelRgba,
+    const uint32_t vertexId) noexcept
+{
+    // Reference: ParticleShaders.js L1375-L1470 (ObjectRenderVertex)
+    CarrierSolidVertexCpuResult out {};
+    const int32_t triangles     = std::max(1, static_cast<int32_t>(uniforms.SolidCountsStride[1] + 0.5f));
+    const int32_t vertices      = std::max(3, static_cast<int32_t>(uniforms.SolidCountsStride[0] + 0.5f));
+    const int32_t carrierStride = std::max(1, static_cast<int32_t>(uniforms.SolidCountsStride[2] + 0.5f));
+    const int32_t wireMode      = static_cast<int32_t>(uniforms.SolidCountsStride[3] + 0.5f);
+    const int32_t isBacking     = static_cast<int32_t>(uniforms.BackingParams[0] + 0.5f);
+
+    const int32_t stride        = (wireMode == 1) ? (triangles * 6) : vertices;
+    const int32_t instanceIndex = static_cast<int32_t>(vertexId) / stride;
+    const int32_t particle      = (isBacking == 1) ? 0 : (instanceIndex * carrierStride);
+    const int32_t slot          = static_cast<int32_t>(vertexId) - instanceIndex * stride;
+
+    int32_t vertexIndex = slot;
+    if (wireMode == 1)
+    {
+        const int32_t triIndex = slot / 6;
+        const int32_t edge     = slot - triIndex * 6;
+        int32_t corner         = (edge + 1) / 2;
+        if (corner > 2) corner = 0;
+        vertexIndex = triIndex * 3 + corner;
+    }
+
+    const size_t texBase = static_cast<size_t>(std::max(0, vertexIndex)) * 8u;
+    Vec3f local  { 0.0f, 0.0f, 0.0f };
+    Vec3f normal { 0.0f, 1.0f, 0.0f };
+    float ridge  = 0.0f;
+    if (texBase + 7u < solidTexelRgba.size())
+    {
+        local  = { solidTexelRgba[texBase + 0u], solidTexelRgba[texBase + 1u], solidTexelRgba[texBase + 2u] };
+        normal = { solidTexelRgba[texBase + 3u], solidTexelRgba[texBase + 4u], solidTexelRgba[texBase + 5u] };
+        ridge  = solidTexelRgba[texBase + 7u];
+    }
+
+    const int32_t side = std::max(1, static_cast<int32_t>(uniforms.Shape.AnchorLayout[2] + 0.5f));
+    const int32_t maxIndex = std::min(side * side - 1, static_cast<int32_t>(states.size()) - 1);
+    const int32_t safeParticle = (maxIndex >= 0) ? std::clamp(particle, 0, maxIndex) : 0;
+    const std::array<float, 4> current  = (maxIndex >= 0) ? states[static_cast<size_t>(safeParticle)].PositionAge  : std::array<float, 4> { 0.0f, 0.0f, 0.0f, 0.0f };
+    const std::array<float, 4> velocity = (maxIndex >= 0) ? states[static_cast<size_t>(safeParticle)].VelocitySeed : std::array<float, 4> { 0.0f, 0.0f, 0.0f, 0.0f };
+
+    const ParticleShadeCpuResult shaded = EvaluateParticleShadeCpu(
+        uniforms.Shape, uniforms.Shade, anchorTexelRgba, safeParticle, current, velocity);
+
+    Vec3f base = (isBacking == 1)
+        ? Vec3f { uniforms.Shape.OriginRadius[0], uniforms.Shape.OriginRadius[1], uniforms.Shape.OriginRadius[2] }
+        : Vec3f { current[0], current[1], current[2] };
+
+    const float glitchAmount     = uniforms.Shape.GlitchParams[0];
+    const float glitchRate       = uniforms.Shape.GlitchParams[1];
+    const float glitchStepJitter = uniforms.Shape.GlitchParams[2];
+    const int32_t derezMode      = static_cast<int32_t>(uniforms.Shape.EffectorAxisDerez[1] + 0.5f);
+    const float derezMix         = uniforms.Shape.EffectorAxisDerez[2];
+    const float simTime          = uniforms.Shade.TimingRegionHeight[1];
+    if (isBacking == 0 && ((glitchAmount > 0.001f && glitchStepJitter > 0.001f) || (derezMode == 5 && shaded.DerezReleased > 0.5f)))
+    {
+        const float rate = std::max(glitchRate, 1.0f);
+        const float stepTick = std::floor(simTime * rate);
+        const Vec3f jSeed { static_cast<float>(safeParticle) * 0.13f + stepTick, velocity[3] * 31.7f + stepTick, stepTick * 0.73f };
+        const float gate = StepF(0.42f - glitchAmount * 0.35f, Hash31F(Add3(jSeed, { 4.1f, 4.1f, 4.1f })));
+        const float amp = glitchAmount * glitchStepJitter * gate
+            + ((derezMode == 5 && shaded.DerezReleased > 0.5f) ? (0.09f * derezMix) : 0.0f);
+        base[0] += (Hash31F(jSeed) - 0.5f) * 2.0f * amp;
+        base[1] += (Hash31F(Add3(jSeed, { 7.3f, 7.3f, 7.3f })) - 0.5f) * 2.0f * amp;
+        base[2] += (Hash31F(Add3(jSeed, { 13.9f, 13.9f, 13.9f })) - 0.5f) * 2.0f * amp;
+    }
+
+    const float sizeSeed   = FractF(velocity[3] * 41.7f);
+    const float sizeRandom = std::exp2((sizeSeed - 0.5f) * 3.0f * uniforms.SizeParams[2]);
+    float radius = (isBacking == 1)
+        ? uniforms.BackingParams[1]
+        : (LerpF(uniforms.SizeParams[0], uniforms.SizeParams[1], shaded.Life) * sizeRandom);
+
+    const int32_t effectorMode       = static_cast<int32_t>(uniforms.Shape.MocapKickEffector[1] + 0.5f);
+    const float   effectorStrength   = uniforms.Shape.MocapKickEffector[2];
+    const float   effectorScaleBoost = uniforms.Shape.EffectorMotion[2];
+    if (isBacking == 0 && effectorMode > 0 && effectorStrength > 0.0001f && std::fabs(effectorScaleBoost) > 0.0001f)
+    {
+        radius *= std::max(0.08f, 1.0f + shaded.EffectorWeight * effectorScaleBoost);
+    }
+
+    const Vec3f camPos { uniforms.CameraPositionFocal[0], uniforms.CameraPositionFocal[1], uniforms.CameraPositionFocal[2] };
+    const Vec3f camFwd { uniforms.CameraForwardPixelRatio[0], uniforms.CameraForwardPixelRatio[1], uniforms.CameraForwardPixelRatio[2] };
+    const float depth = Dot3({ base[0] - camPos[0], base[1] - camPos[1], base[2] - camPos[2] }, camFwd);
+    const int32_t sizeMode = static_cast<int32_t>(uniforms.SizeParams[3] + 0.5f);
+    if (isBacking == 0 && sizeMode == 1)
+    {
+        radius = radius * uniforms.CameraForwardPixelRatio[3] * std::max(depth, 0.05f) / std::max(uniforms.CameraPositionFocal[3], 1.0f);
+    }
+
+    Vec3f spun {};
+    Vec3f spunNormal {};
+    if (isBacking == 1)
+    {
+        const float yaw = uniforms.BackingParams[2];
+        const float cy = std::cos(yaw), sy = std::sin(yaw);
+        const Vec3f yawed       { local[0] * cy + local[2] * sy, local[1], -local[0] * sy + local[2] * cy };
+        const Vec3f yawedNormal { normal[0] * cy + normal[2] * sy, normal[1], -normal[0] * sy + normal[2] * cy };
+        const Vec3f axis { uniforms.Shape.AxisFill[0], uniforms.Shape.AxisFill[1], uniforms.Shape.AxisFill[2] };
+        Vec3f tAxis {}, bAxis {};
+        ComputeShapeBasis3(axis, tAxis, bAxis);
+        spun = Add3(Add3(Mul3(tAxis, yawed[0]), Mul3(axis, yawed[1])), Mul3(bAxis, yawed[2]));
+        spunNormal = Normalise3(Add3(Add3(Mul3(tAxis, yawedNormal[0]), Mul3(axis, yawedNormal[1])), Mul3(bAxis, yawedNormal[2])));
+    }
+    else
+    {
+        const float angle = uniforms.SpinTiltRoughMetal[0] * simTime + velocity[3] * kTwoPi;
+        const float ca = std::cos(angle), sa = std::sin(angle);
+        const float tilt = uniforms.SpinTiltRoughMetal[1] * (FractF(velocity[3] * 3.7f) - 0.5f) * 1.6f;
+        const float ct = std::cos(tilt), st = std::sin(tilt);
+        Vec3f rPos  { local[0] * ca + local[2] * sa, local[1], -local[0] * sa + local[2] * ca };
+        Vec3f rNorm { normal[0] * ca + normal[2] * sa, normal[1], -normal[0] * sa + normal[2] * ca };
+        spun       = { rPos[0], rPos[1] * ct - rPos[2] * st, rPos[1] * st + rPos[2] * ct };
+        spunNormal = { rNorm[0], rNorm[1] * ct - rNorm[2] * st, rNorm[1] * st + rNorm[2] * ct };
+    }
+
+    out.WorldPos    = Add3(base, Mul3(spun, radius));
+    out.WorldNormal = spunNormal;
+    out.LocalPos    = local;
+    out.Colour      = shaded.Colour;
+    out.Alpha       = (isBacking == 1) ? 1.0f : shaded.Alpha;
+    out.Ridge       = ridge;
+    out.Culled      = (out.Alpha <= 0.002f);
+    return out;
+}
+
+CarrierSolidFragmentCpuResult EvaluateCarrierSolidFragmentCpu(
+    const ParticleCarrierSolidUniformBlock& uniforms,
+    const CarrierSolidVertexCpuResult& vertex) noexcept
+{
+    // Reference: ParticleShaders.js L1471-L1551 (ObjectFragment)
+    CarrierSolidFragmentCpuResult out {};
+    if (vertex.Alpha <= 0.002f)
+    {
+        out.Discarded = true;
+        return out;
+    }
+
+    Vec3f N = Normalise3(vertex.WorldNormal);
+    const Vec3f camPos { uniforms.CameraPositionFocal[0], uniforms.CameraPositionFocal[1], uniforms.CameraPositionFocal[2] };
+    const Vec3f V = Normalise3({ camPos[0] - vertex.WorldPos[0], camPos[1] - vertex.WorldPos[1], camPos[2] - vertex.WorldPos[2] });
+    if (Dot3(N, V) < 0.0f) N = Mul3(N, -1.0f);
+
+    const Vec3f keyLight = Normalise3({ 0.42f, 0.82f, 0.46f });
+    const Vec3f rimLight = Normalise3({ -0.55f, 0.28f, -0.62f });
+    const float fresnel  = std::pow(1.0f - ClampF(Dot3(N, V), 0.0f, 1.0f), 4.0f);
+
+    const int32_t backingMode = static_cast<int32_t>(uniforms.BackingParams[3] + 0.5f);
+    const int32_t wireMode    = static_cast<int32_t>(uniforms.SolidCountsStride[3] + 0.5f);
+    const Vec3f   backingCol  { uniforms.BackingColourGlow[0], uniforms.BackingColourGlow[1], uniforms.BackingColourGlow[2] };
+    const float   solidGlow   = uniforms.BackingColourGlow[3];
+    Vec3f rgb {};
+
+    if (backingMode == 0)
+    {
+        const float roughness     = ClampF(uniforms.SpinTiltRoughMetal[2], 0.02f, 1.0f);
+        const float metallic      = ClampF(uniforms.SpinTiltRoughMetal[3], 0.0f, 1.0f);
+        const float specPower     = LerpF(96.0f, 12.0f, roughness);
+        const Vec3f halfKey       = Normalise3(Add3(keyLight, V));
+        const Vec3f halfRim       = Normalise3(Add3(rimLight, V));
+        const float diffuse       = std::max(Dot3(N, keyLight), 0.0f) * 0.72f + std::max(Dot3(N, rimLight), 0.0f) * 0.24f + 0.10f;
+        const float specular      = std::pow(std::max(Dot3(N, halfKey), 0.0f), specPower)
+                                  + std::pow(std::max(Dot3(N, halfRim), 0.0f), specPower * 0.55f) * 0.45f;
+        const float metallicBoost = LerpF(0.35f, 1.15f, metallic);
+        const float luma          = Dot3(vertex.Colour, { 0.30f, 0.59f, 0.11f });
+        const Vec3f albedo        = Lerp3(vertex.Colour, { luma, luma, luma }, metallic * 0.55f);
+        const float specScalar    = specular * metallicBoost * LerpF(0.55f, 1.0f, metallic);
+        rgb = Add3(Mul3(albedo, diffuse * (1.0f - metallic * 0.35f)), { specScalar, specScalar, specScalar });
+        rgb = Add3(rgb, Mul3(vertex.Colour, fresnel * (0.24f + solidGlow)));
+        rgb = Add3(rgb, Mul3(vertex.Colour, vertex.Ridge * 0.22f));
+    }
+    else if (backingMode == 1)
+    {
+        const Vec3f base  { 0.022f, 0.026f, 0.036f };
+        const Vec3f boxA  = Normalise3({ -0.35f, 0.92f, 0.28f });
+        const Vec3f boxB  = Normalise3({ 0.48f, 0.74f, -0.44f });
+        const float softA = std::pow(std::max(Dot3(N, Normalise3(Add3(boxA, V))), 0.0f), 120.0f);
+        const float softB = std::pow(std::max(Dot3(N, Normalise3(Add3(boxB, V))), 0.0f), 84.0f);
+        const float edge  = std::pow(1.0f - ClampF(Dot3(N, V), 0.0f, 1.0f), 4.5f);
+        rgb = Add3(base, Mul3(backingCol, softA * 1.5f + softB * 0.9f + edge * 0.42f));
+        rgb = Add3(rgb, Mul3(vertex.Colour, 0.06f));
+    }
+    else if (backingMode == 2)
+    {
+        const float brushed = 0.5f + 0.5f * std::sin(vertex.LocalPos[1] * 210.0f);
+        const float horizon = SmoothStepF(0.15f, 0.9f, std::fabs(N[1]));
+        const float spec    = std::pow(std::max(Dot3(N, Normalise3(Add3(keyLight, V))), 0.0f), 64.0f);
+        const Vec3f chrome  = Mul3(Lerp3({ 0.30f, 0.33f, 0.38f }, { 0.86f, 0.90f, 0.96f }, horizon), 0.55f + 0.45f * brushed);
+        rgb = Add3(Add3(chrome, { spec * 0.9f, spec * 0.9f, spec * 0.9f }), Mul3(backingCol, fresnel * 0.35f));
+    }
+    else
+    {
+        const float factor = (0.45f + 1.35f * fresnel) * ((wireMode == 1) ? 1.15f : 0.85f) * (0.85f + 0.3f * vertex.Ridge);
+        rgb = Mul3(backingCol, factor);
+    }
+
+    float alpha = vertex.Alpha;
+    if (backingMode == 3) alpha *= 0.55f + 0.45f * fresnel;
+    out.Rgb = rgb;
+    out.Alpha = alpha;
+    out.Discarded = false;
+    return out;
+}
+
+bool RequiresParticleDepthBuffer(const std::span<const ParticleCloudNode> clouds) noexcept
+{
+    for (const ParticleCloudNode& node : clouds)
+    {
+        if (!node.Visible || !node.Enabled || node.Halted) continue;
+        const ParticleCloudParameters& p = node.Evaluated;
+        if (p.CarrierMode == ParticleCarrierOrdinal::Object3D
+            || p.BackingSurface == ParticleBackingSurfaceOrdinal::ObsidianGlossy
+            || p.BackingSurface == ParticleBackingSurfaceOrdinal::BrushedChrome)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<ParticleCarrierSolidDrawCall> ParticleGpuRenderer::BuildCarrierSolidRenderCalls(
+    const std::span<const ParticleCloudNode> clouds,
+    const ParticleGpuSimulation& simulation,
+    const CarrierSolidRegistry& solidRegistry,
+    const ParticleCameraView& camera,
+    const float simulationTimeSeconds,
+    const float regionHeightMeters,
+    const std::array<float, 3>& backingColour) const
+{
+    // Reference: ParticleSimulation.js L376-L446, L507-L513, L577-L592
+    std::vector<ParticleCarrierSolidDrawCall> calls;
+
+    auto emitCall = [&](
+        const ParticleCloudNode& node,
+        const ParticleCloudStateRecord& rec,
+        const bool isBacking,
+        const bool isWire,
+        const uint32_t backingMode)
+    {
+        const ParticleCloudParameters& p = node.Evaluated;
+        const std::string& solidName = isBacking ? p.SpawnSolid : p.CarrierSolid;
+        const std::string& customId  = isBacking ? p.CustomSolidId : (!p.CarrierCustomId.empty() ? p.CarrierCustomId : p.CustomSolidId);
+        const CarrierSolidRecord& solid = solidRegistry.ResolveSolid(solidName, customId);
+        if (solid.Triangles == 0u || solid.VertexCount == 0u) return;
+
+        const uint32_t stride = isWire ? (solid.Triangles * 6u) : solid.VertexCount;
+        const uint32_t rawCount = isBacking ? 1u : std::min(p.Count, rec.TextureSide * rec.TextureSide);
+        uint32_t carrierStride = 1u;
+        if (!isBacking && stride > 0u && static_cast<uint64_t>(rawCount) * static_cast<uint64_t>(stride) > kMaximumCarrierVertices)
+        {
+            const uint64_t num = static_cast<uint64_t>(rawCount) * static_cast<uint64_t>(stride);
+            carrierStride = static_cast<uint32_t>(std::max<uint64_t>(1u, (num + kMaximumCarrierVertices - 1u) / kMaximumCarrierVertices));
+        }
+        const uint32_t drawnCount  = isBacking ? 1u : ((rawCount + carrierStride - 1u) / carrierStride);
+        const uint32_t vertexCount = drawnCount * stride;
+        if (vertexCount == 0u) return;
+
+        const bool solidDepth = (!isWire) && (isBacking
+            ? (backingMode == 1u || backingMode == 2u)
+            : (p.Blend == ParticleBlendOrdinal::Alpha));
+
+        ParticleBlendOrdinal blend = p.Blend;
+        if (solidDepth)          blend = ParticleBlendOrdinal::Alpha;
+        else if (isBacking && isWire) blend = ParticleBlendOrdinal::Additive;
+
+        const ParticleCarrierSolidUniformBlock uniforms = BuildParticleCarrierSolidUniforms(
+            p, rec, solid.VertexCount, solid.Triangles, carrierStride,
+            isBacking, isWire, backingMode, camera, simulationTimeSeconds, regionHeightMeters, backingColour);
+
+        calls.push_back(ParticleCarrierSolidDrawCall {
+            node.NodeId,
+            solidName,
+            customId,
+            isWire ? ParticleSolidTopologyOrdinal::LineList : ParticleSolidTopologyOrdinal::TriangleList,
+            blend,
+            solidDepth,
+            solidDepth,
+            isBacking,
+            backingMode,
+            carrierStride,
+            drawnCount,
+            vertexCount,
+            uniforms
+        });
+    };
+
+    for (const ParticleCloudNode& node : clouds)
+    {
+        if (!node.Visible || !node.Enabled || node.Halted) continue;
+        const ParticleCloudStateRecord* rec = simulation.FindCloudRecord(node.NodeId);
+        if (!rec || rec->ActiveCount == 0u) continue;
+
+        const uint32_t backingMode = static_cast<uint32_t>(node.Evaluated.BackingSurface);
+        if (backingMode > 0u)
+        {
+            emitCall(node, *rec, true, backingMode == 3u, backingMode);
+        }
+
+        if (node.Evaluated.CarrierMode == ParticleCarrierOrdinal::Object3D)
+        {
+            emitCall(node, *rec, false, false, 0u);
+        }
+    }
+
     return calls;
 }
 

@@ -629,8 +629,10 @@ frontier_compile_particlespace_slang_shader(ParticleTrailUpdateCompute.slang  Co
 frontier_compile_particlespace_slang_shader(ParticleSpriteRasterization.slang ParticleSpriteVertexEntry   vertex   ParticleSpriteQuad.vert.spv)
 frontier_compile_particlespace_slang_shader(ParticleSpriteRasterization.slang ParticleStreakVertexEntry   vertex   ParticleSpriteStreak.vert.spv)
 frontier_compile_particlespace_slang_shader(ParticleSpriteRasterization.slang ParticleSpriteFragmentEntry fragment ParticleSprite.frag.spv)
-frontier_compile_particlespace_slang_shader(ParticleRibbonRasterization.slang ParticleRibbonVertexEntry   vertex   ParticleRibbon.vert.spv)
-frontier_compile_particlespace_slang_shader(ParticleRibbonRasterization.slang ParticleRibbonFragmentEntry fragment ParticleRibbon.frag.spv)
+frontier_compile_particlespace_slang_shader(ParticleRibbonRasterization.slang       ParticleRibbonVertexEntry         vertex   ParticleRibbon.vert.spv)
+frontier_compile_particlespace_slang_shader(ParticleRibbonRasterization.slang       ParticleRibbonFragmentEntry       fragment ParticleRibbon.frag.spv)
+frontier_compile_particlespace_slang_shader(ParticleCarrierSolidRasterization.slang ParticleCarrierSolidVertexEntry   vertex   ParticleCarrierSolid.vert.spv)
+frontier_compile_particlespace_slang_shader(ParticleCarrierSolidRasterization.slang ParticleCarrierSolidFragmentEntry fragment ParticleCarrierSolid.frag.spv)
 
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
