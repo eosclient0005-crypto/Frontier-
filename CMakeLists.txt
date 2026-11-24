@@ -594,6 +594,37 @@ frontier_compile_forcefield_slang_shader(ForceFieldOverlayRasterization.slang Fo
 frontier_compile_forcefield_slang_shader(ForceFieldOverlayRasterization.slang ForceVectorVertexEntry   vertex   ForceFieldVectorOverlay.vert.spv)
 frontier_compile_forcefield_slang_shader(ForceFieldOverlayRasterization.slang ForceOverlayFragmentEntry fragment ForceFieldOverlay.frag.spv)
 
+function(frontier_compile_particlespace_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
+    set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/ParticleSpace/${SLANG_REL_PATH}")
+    set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
+    add_custom_command(
+        OUTPUT "${OUT_SPV}"
+        COMMAND "${FRONTIER_SLANGC_BIN}"
+            "${IN_SLANG}"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields"
+            -I "${CMAKE_SOURCE_DIR}/Engine/Shaders/ParticleSpace"
+            -target spirv
+            -profile spirv_1_3
+            -emit-spirv-directly
+            -fvk-use-entrypoint-name
+            -matrix-layout-row-major
+            -O0
+            -entry "${ENTRY_NAME}"
+            -stage "${SHADER_UNIT}"
+            -o "${OUT_SPV}"
+        DEPENDS
+            "${IN_SLANG}"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceFieldNoise.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ForceFields/ForceModelEvaluation.slang"
+            "${CMAKE_SOURCE_DIR}/Engine/Shaders/ParticleSpace/ParticleShapeAnchor.slang"
+        COMMENT "[Slang] Compiling ParticleSpace/${SLANG_REL_PATH} (${SHADER_UNIT}:${ENTRY_NAME}) -> ${OUT_SPV_NAME}"
+        VERBATIM
+    )
+    set(FRONTIER_SPV_OUTPUTS ${FRONTIER_SPV_OUTPUTS} "${OUT_SPV}" PARENT_SCOPE)
+endfunction()
+
+frontier_compile_particlespace_slang_shader(ParticleUpdateCompute.slang ComputeEntry compute ParticleUpdateCompute.comp.spv)
+
 function(frontier_compile_baking_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME USE_HW_RAYQUERY)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Baking/${SLANG_REL_PATH}")
     set(OUT_SPV "${FRONTIER_COMPILED_SHADER_DIR}/${OUT_SPV_NAME}")
@@ -986,6 +1017,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ParticleSpace/FireworkPatternSampler.cpp
     Engine/ParticleSpace/ParticleTemplateRegistry.cpp
     Engine/ParticleSpace/CarrierSolidRegistry.cpp
+    Engine/ParticleSpace/ParticleGpuSimulation.cpp
     Engine/SimulationSpace/PhysicsSpace/ForceFieldPhysicsCoupling.cpp
     Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.cpp
     Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.cpp
