@@ -148,7 +148,16 @@ public:
         return RigidFeedback_;
     }
 
-    [[nodiscard]] const SimulationCoordinatorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
+    [[nodiscard]] const SimulationCoordinatorParameters& InspectParameters() const noexcept { return Parameters_; }
+    [[nodiscard]] SimulationCoordinatorParameters&       AccessParameters() noexcept { return Parameters_; }
+    [[nodiscard]] const SimulationCoordinatorTelemetry&  InspectTelemetry() const noexcept { return Telemetry_; }
+    void RestoreClockState(uint64_t completedTicks, double accumulatedSeconds) noexcept
+    {
+        Telemetry_.CompletedTicks     = completedTicks;
+        Telemetry_.AccumulatedSeconds = accumulatedSeconds;
+        StepAccumulator_              = 0.0;
+        Deformables_.RestoreClockState(completedTicks, accumulatedSeconds, completedTicks);
+    }
 
 private:
     static std::array<float, 3> SampleFluidVelocityThunk(const void* userContext, const std::array<float, 3>& worldPosition) noexcept;

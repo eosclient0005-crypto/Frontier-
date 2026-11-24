@@ -298,6 +298,7 @@ struct ParticleGpuExecutorTelemetry
     bool                   CollisionPipelineReady    = false;
     bool                   SpatialHashPipelineReady  = false;
     bool                   XpbdPipelineReady         = false;
+    bool                   ExternalGasVolumeBound    = false;
 };
 
 /// Optional additive GPU physics switches for Layer 220 (XPBD) & Layer 221 (Jolt + Spatial-Hash collisions).
@@ -371,6 +372,15 @@ public:
         return AdditiveConfig_;
     }
 
+    /// Binds a live GPU Fluid 3D velocity VkImageView (as uint64_t) for zero-copy GPU Fluid->Particle advection.
+    /// Passing 0 or `gpuResident == false` falls back to the executor's internal 4x4x4 fallback gas volume.
+    void BindExternalFluidVelocityView(uint64_t velocityImageViewHandle, bool gpuResident) noexcept
+    {
+        ExternalFluidVelocityView_        = (gpuResident && velocityImageViewHandle != 0ull) ? velocityImageViewHandle : 0ull;
+        Telemetry_.ExternalGasVolumeBound = (ExternalFluidVelocityView_ != 0ull);
+    }
+    [[nodiscard]] uint64_t QueryBoundFluidVelocityView() const noexcept { return ExternalFluidVelocityView_; }
+
     /// Executes one particle tick: dispatches real Vulkan 1.2 compute shaders asynchronously when GPU-backed
     /// (including Layer 221 rigid/spatial-hash collisions & Layer 220 XPBD when enabled), or headless fallback.
     void ExecuteStep(
@@ -399,9 +409,10 @@ public:
     [[nodiscard]] const ParticleGpuExecutorTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
 
 private:
-    uint32_t                         MaxParticleCapacity_ = 4096u;
-    uint32_t                         ActivePong_          = 0u;
-    ParticleAdditiveGpuPhysicsConfig AdditiveConfig_      {};
+    uint32_t                         MaxParticleCapacity_       = 4096u;
+    uint32_t                         ActivePong_                = 0u;
+    uint64_t                         ExternalFluidVelocityView_ = 0ull;
+    ParticleAdditiveGpuPhysicsConfig AdditiveConfig_            {};
     ParticleGpuExecutorTelemetry     Telemetry_           {};
     SimulationSpace::AsyncGpuReadbackRing<ParticleRigidImpulseEntry, kTripleBufferSlots> ImpulseReadbackRing_ {};
     bool                             Initialized_         = false;

@@ -156,6 +156,13 @@ void SimulationCoordinatorExtension::Tick(double deltaSeconds) noexcept
                 {
                     gasView.Callback    = &SimulationCoordinatorExtension::SampleFluidVelocityThunk;
                     gasView.UserContext = this;
+                    const auto fluidFeed = FluidGpuExecutor_.InspectVolumeGpuFeed();
+                    ParticleGpuExecutor_.BindExternalFluidVelocityView(
+                        fluidFeed.VelocityViewHandle, fluidFeed.GpuResident);
+                }
+                else
+                {
+                    ParticleGpuExecutor_.BindExternalFluidVelocityView(0ull, false);
                 }
 
                 ParticleGpuExecutor_.ExecuteStep(

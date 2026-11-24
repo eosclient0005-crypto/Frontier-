@@ -1762,14 +1762,25 @@ void ParticleVulkanGpuExecutor::DispatchGpuAsync(
 
     const uint32_t readIdx  = ActivePong_;
     const uint32_t writeIdx = 1u - ActivePong_;
+    const VkImageView gasVelView = (ExternalFluidVelocityView_ != 0ull)
+        ? reinterpret_cast<VkImageView>(ExternalFluidVelocityView_)
+        : ImgFallbackGas_.ViewHandle;
+    const bool hasLiveGasVol = (ExternalFluidVelocityView_ != 0ull);
+    const ParticleUpdateUniformBlock updatedUniforms = BuildParticleUpdateUniforms(
+        primaryCloud, side, 1u, 0u, region, simulationTimeSeconds, deltaTimeSeconds,
+        Telemetry_.CompletedTicks == 0ull, static_cast<uint32_t>(std::min<size_t>(forceRecords.size(), 64u)), hasLiveGasVol);
+    if (BufUpdateUbo_[slot].HostAddress != nullptr)
+    {
+        std::memcpy(BufUpdateUbo_[slot].HostAddress, &updatedUniforms, sizeof(updatedUniforms));
+    }
     const std::array<ComputeSlotDescriptor, 8> slots {{
-        { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufUpdateUbo_[slot].BufferHandle, sizeof(uniforms) },
+        { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufUpdateUbo_[slot].BufferHandle, sizeof(updatedUniforms) },
         { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufStates_[readIdx].BufferHandle,  VK_WHOLE_SIZE },
         { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufStates_[writeIdx].BufferHandle, VK_WHOLE_SIZE },
         { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufPrevPos_.BufferHandle,          VK_WHOLE_SIZE },
         { 4u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufAnchors_.BufferHandle,          VK_WHOLE_SIZE },
         { 5u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufForces_.BufferHandle,           VK_WHOLE_SIZE },
-        { 6u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgFallbackGas_.ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+        { 6u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, gasVelView, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
         { 7u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE, LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
     }};
 

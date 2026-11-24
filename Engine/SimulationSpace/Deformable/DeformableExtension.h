@@ -104,6 +104,13 @@ public:
     [[nodiscard]] Threading::ReadingLease<DeformablePublishedReading> AcquireHeroReadLease() const noexcept;
 
     [[nodiscard]] const DeformableExtensionTelemetry& InspectTelemetry() const noexcept { return Telemetry_; }
+    void RestoreClockState(uint64_t completedTicks, double accumulatedSeconds, uint64_t worldTickIndex) noexcept
+    {
+        Telemetry_.CompletedTicks     = completedTicks;
+        Telemetry_.AccumulatedSeconds = accumulatedSeconds;
+        StepAccumulator_              = 0.0;
+        WorldRegistry_.RestoreWorldTickIndex(worldTickIndex);
+    }
 
 private:
     DeformableExtensionParameters               Parameters_       {};

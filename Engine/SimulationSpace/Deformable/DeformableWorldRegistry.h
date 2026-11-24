@@ -113,6 +113,9 @@ public:
         float windPulse = 0.0f,
         const DeformableExternalCoupling* sharedCoupling = nullptr);
 
+    [[nodiscard]] uint64_t QueryWorldTickIndex() const noexcept { return WorldTickIndex_; }
+    void                   RestoreWorldTickIndex(uint64_t tickIndex) noexcept { WorldTickIndex_ = tickIndex; }
+
 private:
     static void TranslateBodyBy(DeformableBody& body, const std::array<float, 3>& offsetMeters) noexcept;
     void        InitializeInstanceExecutor(DeformableWorldInstance& inst);
