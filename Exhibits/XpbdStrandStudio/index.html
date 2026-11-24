@@ -130,7 +130,7 @@
       </div>
       <div class="slider-row">
         <div class="slider-hdr"><span>Wheel Spin (rad/s)</span><span class="val" id="vTyreSpin">3.5</span></div>
-        <input type="range" id="sTyreSpin" min="-12" max="16" step="0.25" value="3.5"/>
+        <input type="range" id="sTyreSpin" min="-20" max="24" step="0.25" value="3.5"/>
       </div>
       <div class="tool-row" style="margin-top:3px;">
         <button class="btn warn" id="btnTyreDrop">Drop Impact Test</button>
@@ -775,11 +775,30 @@ class XpbdWorld {
     for (let s = 0; s < substeps; s++) {
       const subT = timeSec + s * h;
 
-      // 0. Pneumatic XPBD Tire: co-rotating rim beads, Boyle-bulge pneumatic inflation & axle suspension
+      // 0. Pneumatic XPBD Tire: exact co-rotating frame + real outward centrifugal expansion + Boyle bulge
       for (const ty of this.tyres) {
         const S = ty.sectors, P = ty.profile, base = ty.startIdx;
         const spin = cfg.tyreSpin;
-        ty.spinAngle += spin * h;
+        const spin2 = spin * spin;
+        const dA = spin * h;
+        const cdA = Math.cos(dA), sdA = Math.sin(dA);
+        ty.spinAngle += dA;
+
+        // Exact co-rotating transport of carcass nodes around axle (zero inward symplectic shrinkage at ANY RPM!)
+        if (Math.abs(dA) > 1e-9) {
+          const hx0 = ty.hubX, hy0 = ty.hubY;
+          for (let si = 0; si < S; si++) {
+            for (let pi = 1; pi < P - 1; pi++) {
+              const p3 = (base + si * P + pi) * 3;
+              const rx = pos[p3] - hx0, ry = pos[p3+1] - hy0;
+              pos[p3]   = hx0 + rx * cdA - ry * sdA;
+              pos[p3+1] = hy0 + rx * sdA + ry * cdA;
+              const vx = vel[p3], vy = vel[p3+1] - ty.hubVy;
+              vel[p3]   = vx * cdA - vy * sdA;
+              vel[p3+1] = ty.hubVy + vx * sdA + vy * cdA;
+            }
+          }
+        }
 
         // Compute enclosed volume to drive real Boyle's-law sidewall bulge when compressed!
         let curVol = 0.0;
@@ -809,18 +828,23 @@ class XpbdWorld {
         const safeVol = Math.max(ty.restVol * 0.35, curVol);
         const boyle = Math.max(0.85, Math.min(1.9, ty.restVol / safeVol));
 
+        // Real centrifugal tire growth: high wheelspin expands the tire radially OUTWARD (dragster ballooning!)
+        const spinStiff = 0.65 + cfg.tyrePsi * 0.025;
+        const spinGrowth = Math.min(0.24, (spin2 * 0.00048) / spinStiff);
+        const effOuterR = ty.outerR + (ty.outerR - ty.rimR) * spinGrowth * 1.15;
+
         // Couple axle vertical load with pneumatic ground & curb bump reaction!
         let supportTopY = this.groundY;
         if (colOn) {
           const dxC = ty.hubX - cx, dzC = ty.hubZ - cz;
           const horiz = Math.hypot(dxC, dzC);
-          if (horiz < cr + ty.outerR * 0.72) {
+          if (horiz < cr + effOuterR * 0.72) {
             const bumpH = cy + Math.sqrt(Math.max(0, (cr + 0.04)*(cr + 0.04) - dxC*dxC * 0.45));
             if (bumpH > supportTopY) supportTopY = bumpH;
           }
         }
-        const deflection = Math.max(0.0, (supportTopY + ty.outerR) - ty.hubY);
-        const kPneumatic = 18.0 + cfg.tyrePsi * 2.95 * boyle;
+        const deflection = Math.max(0.0, (supportTopY + effOuterR) - ty.hubY);
+        const kPneumatic = 18.0 + cfg.tyrePsi * 2.95 * boyle + spin2 * 0.08;
         const cPneumatic = 10.5 + cfg.tyrePsi * 0.20;
         const springUp = deflection > 0.0 ? (deflection * kPneumatic - ty.hubVy * cPneumatic) : (-ty.hubVy * 0.6);
         const axleDown = -cfg.tyreLoad * 18.5;
@@ -833,46 +857,45 @@ class XpbdWorld {
           if (ty.hubVy < 0) ty.hubVy = -ty.hubVy * 0.18;
         }
 
-        // Co-rotating pneumatic carcass equilibrium (zero diagonal twist, zero checkerboard buckling!)
-        // Sidewalls smoothly bulge outward in ±Z near the compressed bottom contact patch!
+        // Co-rotating pneumatic carcass + TRUE outward centrifugal force (+w^2 * r)
+        // Centrifugal hoop tension increases radial stiffness & damping with w^2 (prevents supercritical standing-wave flip!)
         const psiScale = Math.max(0.22, Math.min(1.75, cfg.tyrePsi / 32.0));
-        const kCarcass = (160.0 + cfg.tyrePsi * 14.5) * boyle;
+        const kCarcass = (165.0 + cfg.tyrePsi * 14.5) * boyle + spin2 * 0.95;
+        const cCarcass = 18.0 + Math.abs(spin) * 1.35;
         const bulgeAmp = Math.min(0.16, deflection * 0.52 + Math.max(0, boyle - 1.0) * 0.14);
         const profilePts = ty.profilePts;
 
         for (let si = 0; si < S; si++) {
           const a = (si / S) * Math.PI * 2 + ty.spinAngle;
           const ca = Math.cos(a), sa = Math.sin(a);
-          // Contact-patch localized sidewall bulge peaks smoothly at bottom (sa = -1)
           const bottomMask = Math.pow(Math.max(0.0, -sa), 1.6);
           for (let pi = 0; pi < P; pi++) {
             const pid = base + si * P + pi;
             const p3 = pid * 3;
             const [r0, z0] = profilePts[pi];
             if (pi === 0 || pi === P - 1) {
-              // Rigidly locked rim beads
               pos[p3]   = ty.hubX + ca * ty.rimR;
               pos[p3+1] = ty.hubY + sa * ty.rimR;
               pos[p3+2] = ty.hubZ + z0;
               prev[p3]  = pos[p3]; prev[p3+1] = pos[p3+1]; prev[p3+2] = pos[p3+2];
               continue;
             }
-            // Smooth sidewall profile bulge + slight pressure expansion
+            const radialArm = Math.max(0, r0 - ty.rimR);
+            // Outward centrifugal radial growth + pneumatic inflation
+            const rInf = r0 + radialArm * ((psiScale - 1.0) * 0.045 + spinGrowth * 1.15);
+            // Contact-patch sidewall bulge + slight Poisson narrowing as diameter balloons
             const sideMask = (pi === 1 || pi === 2 || pi === 6 || pi === 7) ? 1.0 : 0.25;
             const zSign = (z0 < 0) ? -1.0 : (z0 > 0 ? 1.0 : 0.0);
-            const rInf = r0 + (r0 - ty.rimR) * (psiScale - 1.0) * 0.045;
-            const zInf = z0 + zSign * bulgeAmp * sideMask * (0.28 + 0.72 * bottomMask);
+            const zInf = z0 * (1.0 - spinGrowth * 0.30) + zSign * bulgeAmp * sideMask * (0.28 + 0.72 * bottomMask);
             const tx = ty.hubX + ca * rInf;
             const tyT = ty.hubY + sa * rInf;
             const tz = ty.hubZ + zInf;
 
-            // Co-rotating target velocity (hub linear + rim spin) so rubber rotates cleanly with rim!
-            const targetVx = -sa * rInf * spin;
-            const targetVy =  ca * rInf * spin + ty.hubVy;
-            // Viscoelastic pneumatic restoring acceleration toward inflated carcass shape
-            const ax = (tx - pos[p3])   * kCarcass + (targetVx - vel[p3])   * 18.0;
-            const ay = (tyT - pos[p3+1]) * kCarcass + (targetVy - vel[p3+1]) * 18.0;
-            const az = (tz - pos[p3+2]) * kCarcass - vel[p3+2] * 18.0;
+            // Real outward centrifugal force in co-rotating frame (+w^2 * r_arm along radial outward)
+            const centAcc = spin2 * radialArm * 0.14;
+            const ax = (tx - pos[p3])   * kCarcass + ca * centAcc - vel[p3] * cCarcass;
+            const ay = (tyT - pos[p3+1]) * kCarcass + sa * centAcc + (ty.hubVy - vel[p3+1]) * cCarcass;
+            const az = (tz - pos[p3+2]) * kCarcass - vel[p3+2] * cCarcass;
             vel[p3]   += ax * h;
             vel[p3+1] += ay * h;
             vel[p3+2] += az * h;
@@ -880,11 +903,33 @@ class XpbdWorld {
         }
       }
 
-      // 0b. 3D Volumetric Neo-Hookean FEM Tire: rotating rim beads + inner cavity pneumatic pressure + axle load
+      // 0b. 3D Volumetric Neo-Hookean FEM Tire: exact co-rotating frame + real outward centrifugal expansion!
       for (const ft of this.femTyres) {
         const S = ft.sectors, P = ft.profile, base = ft.startIdx;
         const spin = cfg.tyreSpin;
-        ft.spinAngle += spin * h;
+        const spin2 = spin * spin;
+        const dA = spin * h;
+        const cdA = Math.cos(dA), sdA = Math.sin(dA);
+        ft.spinAngle += dA;
+
+        // Exact co-rotating transport of 3D FEM rubber nodes (zero inward symplectic collapse or twist!)
+        if (Math.abs(dA) > 1e-9) {
+          const hx0 = ft.hubX, hy0 = ft.hubY;
+          for (let si = 0; si < S; si++) {
+            for (let pi = 1; pi < P - 1; pi++) {
+              for (let lay = 0; lay < 2; lay++) {
+                const p3 = (base + (si * P + pi) * 2 + lay) * 3;
+                const rx = pos[p3] - hx0, ry = pos[p3+1] - hy0;
+                pos[p3]   = hx0 + rx * cdA - ry * sdA;
+                pos[p3+1] = hy0 + rx * sdA + ry * cdA;
+                const vx = vel[p3], vy = vel[p3+1] - ft.hubVy;
+                vel[p3]   = vx * cdA - vy * sdA;
+                vel[p3+1] = ft.hubVy + vx * sdA + vy * cdA;
+              }
+            }
+          }
+        }
+
         const hx = ft.hubX, hy = ft.hubY, hz = ft.hubZ;
 
         // Compute current inner-cavity pneumatic volume for Boyle's-law air spring!
@@ -910,17 +955,22 @@ class XpbdWorld {
         }
         const boyle = Math.max(0.85, Math.min(2.0, ft.restVol / Math.max(ft.restVol * 0.35, curVol)));
 
+        // Centrifugal tire expansion: softer Young's modulus (E) / lower PSI balloons outward more at high RPM!
+        const femStiff = 0.55 + cfg.femYoung * 0.38 + cfg.tyrePsi * 0.015;
+        const spinGrowth = Math.min(0.24, (spin2 * 0.00068) / femStiff);
+        const effOuterR = ft.outerR + (ft.outerR - ft.rimR) * spinGrowth * 1.25;
+
         // Axle load & pneumatic/rubber suspension support
         let supportTopY = this.groundY;
         if (colOn) {
           const dxC = hx - cx, dzC = hz - cz;
-          if (Math.hypot(dxC, dzC) < cr + ft.outerR * 0.72) {
+          if (Math.hypot(dxC, dzC) < cr + effOuterR * 0.72) {
             const bumpH = cy + Math.sqrt(Math.max(0, (cr + 0.04)*(cr + 0.04) - dxC*dxC * 0.45));
             if (bumpH > supportTopY) supportTopY = bumpH;
           }
         }
-        const deflection = Math.max(0.0, (supportTopY + ft.outerR) - ft.hubY);
-        const kHub = 16.0 + cfg.tyrePsi * 2.55 * boyle + cfg.femYoung * 9.5;
+        const deflection = Math.max(0.0, (supportTopY + effOuterR) - ft.hubY);
+        const kHub = 16.0 + cfg.tyrePsi * 2.55 * boyle + cfg.femYoung * 9.5 + spin2 * 0.09;
         const cHub = 10.5 + cfg.tyrePsi * 0.16;
         const springUp = deflection > 0.0 ? (deflection * kHub - ft.hubVy * cHub) : (-ft.hubVy * 0.5);
         const axleForce = -cfg.tyreLoad * 18.5 + Math.max(0.0, springUp) - (deflection <= 0 ? ft.hubVy * 0.35 : 0);
@@ -932,9 +982,12 @@ class XpbdWorld {
           if (ft.hubVy < 0) ft.hubVy = -ft.hubVy * 0.16;
         }
 
-        // Rigidly clamp inner & outer bead nodes (pi = 0, pi = P-1, both wall layers L=0,1) onto rotating alloy rim
-        // AND apply true internal air pressure (PSI) outward on the inner cavity surface (L=0)!
+        // Rigidly clamp inner & outer bead nodes onto rotating alloy rim, apply internal PSI on inner liner,
+        // and apply REAL outward centrifugal acceleration (+w^2 * r) directly against the 3D Neo-Hookean FEM tets!
+        // Centrifugal hoop tension stiffens radial recovery with w^2 so high RPM stays circular without phase flip!
         const pressGain = (cfg.tyrePsi * 1.45) * boyle;
+        const kGuide = 46.0 + cfg.tyrePsi * 3.2 + spin2 * 1.15;
+        const cGuide = 14.0 + Math.abs(spin) * 1.65;
         const innerPts = ft.innerPts, outerPts = ft.outerPts;
         for (let si = 0; si < S; si++) {
           const a = (si / S) * Math.PI * 2 + ft.spinAngle;
@@ -951,31 +1004,34 @@ class XpbdWorld {
                 prev[p3]  = pos[p3]; prev[p3+1] = pos[p3+1]; prev[p3+2] = pos[p3+2];
                 continue;
               }
-              // Co-rotating spin drive coupling + viscoelastic rubber damping (zero twist!)
-              const tx = ft.hubX + ca * r0;
-              const tyT = ft.hubY + sa * r0;
-              const tz = ft.hubZ + z0;
-              const targetVx = -sa * r0 * spin;
-              const targetVy =  ca * r0 * spin + ft.hubVy;
-              // Gentle pneumatic air-cavity pressure on inner liner (lay === 0)
+              // Pneumatic air-cavity pressure outward on inner rubber liner (lay === 0)
+              const radialArm = Math.max(0.0, r0 - ft.rimR);
               if (lay === 0) {
-                const ox = ca * (r0 - ft.rimR), oy = sa * (r0 - ft.rimR), oz = z0;
+                const ox = ca * radialArm, oy = sa * radialArm, oz = z0;
                 const ol = Math.hypot(ox, oy, oz) || 1;
                 vel[p3]   += (ox / ol) * pressGain * 0.28 * h;
                 vel[p3+1] += (oy / ol) * pressGain * 0.28 * h;
                 vel[p3+2] += (oz / ol) * pressGain * 0.28 * h;
               }
-              // Gentle co-rotating gyroscopic stabilization (keeps 3D FEM torus aligned while letting FEM tets deform freely!)
-              const kGuide = 45.0 + cfg.tyrePsi * 3.2;
-              vel[p3]   += ((tx - pos[p3]) * kGuide + (targetVx - vel[p3]) * 14.0) * h;
-              vel[p3+1] += ((tyT - pos[p3+1]) * kGuide + (targetVy - vel[p3+1]) * 14.0) * h;
-              vel[p3+2] += ((tz - pos[p3+2]) * (kGuide * 0.35) - vel[p3+2] * 14.0) * h;
+              // Real outward centrifugal force (+w^2 * r) in the co-rotating frame!
+              // 3D Neo-Hookean FEM tetrahedra naturally resist hoop tension & narrow laterally via Poisson ratio!
+              const rTarget = r0 + radialArm * spinGrowth * 1.18;
+              const zTarget = z0 * (1.0 - spinGrowth * cfg.femPoisson * 0.45);
+              const tx = ft.hubX + ca * rTarget;
+              const tyT = ft.hubY + sa * rTarget;
+              const tz = ft.hubZ + zTarget;
+              const centAcc = spin2 * radialArm * 0.14;
+              vel[p3]   += ((tx - pos[p3]) * kGuide + ca * centAcc - vel[p3] * cGuide) * h;
+              vel[p3+1] += ((tyT - pos[p3+1]) * kGuide + sa * centAcc + (ft.hubVy - vel[p3+1]) * cGuide) * h;
+              vel[p3+2] += ((tz - pos[p3+2]) * (kGuide * 0.35) - vel[p3+2] * cGuide) * h;
             }
           }
         }
       }
 
       // 1. External forces + Symplectic predict
+      const maxSpeed = Math.max(14.0, Math.abs(cfg.tyreSpin) * 2.8 + 14.0);
+      const maxSpeed2 = maxSpeed * maxSpeed;
       for (let i = 0; i < n; i++) {
         const w = invM[i];
         const i3 = i * 3;
@@ -994,10 +1050,10 @@ class XpbdWorld {
         vel[i3+1] = (vel[i3+1] + ay * h) * damp;
         vel[i3+2] = (vel[i3+2] + az * h) * damp;
 
-        // Clamp max speed for stability
+        // Clamp max speed for stability (high enough to never choke wheelspin!)
         const sp2 = vel[i3]*vel[i3] + vel[i3+1]*vel[i3+1] + vel[i3+2]*vel[i3+2];
-        if (sp2 > 144.0) {
-          const sc = 12.0 / Math.sqrt(sp2);
+        if (sp2 > maxSpeed2) {
+          const sc = maxSpeed / Math.sqrt(sp2);
           vel[i3] *= sc; vel[i3+1] *= sc; vel[i3+2] *= sc;
         }
 
