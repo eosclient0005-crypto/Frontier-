@@ -1475,17 +1475,24 @@ bool FluidVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::path&
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     BufTracers_[0]   = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
     BufTracers_[1]   = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufDebrisPos_[0] = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufDebrisPos_[1] = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufDebrisVel_[0] = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+    BufDebrisVel_[1] = Encoder_.AllocateDeviceLocalBuffer(2048ull * 16ull, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
 
     for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
     {
-        BufInjectUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidInjectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufAdvectUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidAdvectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufThermoUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidThermodynamicsUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufForcesUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidForcesUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufVortUbo_[s]   = Encoder_.AllocateHostWritableBuffer(sizeof(FluidVorticityUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufDivUbo_[s]    = Encoder_.AllocateHostWritableBuffer(sizeof(FluidDivergenceUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufPressUbo_[s]  = Encoder_.AllocateHostWritableBuffer(sizeof(FluidPressureUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-        BufGradUbo_[s]   = Encoder_.AllocateHostWritableBuffer(sizeof(FluidGradientShiftUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufInjectUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidInjectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufAdvectUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidAdvectUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufMacCormackUbo_[s] = Encoder_.AllocateHostWritableBuffer(sizeof(FluidMacCormackUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufThermoUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidThermodynamicsUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufForcesUbo_[s]     = Encoder_.AllocateHostWritableBuffer(sizeof(FluidForcesUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufVortUbo_[s]       = Encoder_.AllocateHostWritableBuffer(sizeof(FluidVorticityUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufDivUbo_[s]        = Encoder_.AllocateHostWritableBuffer(sizeof(FluidDivergenceUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufPressUbo_[s]      = Encoder_.AllocateHostWritableBuffer(sizeof(FluidPressureUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufGradUbo_[s]       = Encoder_.AllocateHostWritableBuffer(sizeof(FluidGradientShiftUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufTracerUbo_[s]     = Encoder_.AllocateHostWritableBuffer(192ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufDebrisUbo_[s]     = Encoder_.AllocateHostWritableBuffer(512ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     }
 
     const uint64_t singleVolBytes =
@@ -1522,12 +1529,15 @@ void FluidVulkanGpuExecutor::ReleaseGpuResources() noexcept
         };
         relBuf(BufForceRecords_);
         relBuf(BufOccupancy_);
-        relBuf(BufTracers_[0]);
-        relBuf(BufTracers_[1]);
+        relBuf(BufTracers_[0]);   relBuf(BufTracers_[1]);
+        relBuf(BufDebrisPos_[0]); relBuf(BufDebrisPos_[1]);
+        relBuf(BufDebrisVel_[0]); relBuf(BufDebrisVel_[1]);
         for (uint32_t s = 0u; s < kTripleBufferSlots; ++s)
         {
-            relBuf(BufInjectUbo_[s]); relBuf(BufAdvectUbo_[s]); relBuf(BufThermoUbo_[s]); relBuf(BufForcesUbo_[s]);
-            relBuf(BufVortUbo_[s]);   relBuf(BufDivUbo_[s]);    relBuf(BufPressUbo_[s]);  relBuf(BufGradUbo_[s]);
+            relBuf(BufInjectUbo_[s]); relBuf(BufAdvectUbo_[s]); relBuf(BufMacCormackUbo_[s]);
+            relBuf(BufThermoUbo_[s]); relBuf(BufForcesUbo_[s]); relBuf(BufVortUbo_[s]);
+            relBuf(BufDivUbo_[s]);    relBuf(BufPressUbo_[s]);  relBuf(BufGradUbo_[s]);
+            relBuf(BufTracerUbo_[s]); relBuf(BufDebrisUbo_[s]);
         }
         if (LinearSampler_ != VK_NULL_HANDLE)
         {
@@ -1585,6 +1595,11 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
     advU.AdvectParams = { deltaTimeSeconds, settings.Dissipation, 1.0f, 0.0f };
     if (BufAdvectUbo_[slot].HostAddress) std::memcpy(BufAdvectUbo_[slot].HostAddress, &advU, sizeof(advU));
 
+    FluidMacCormackUniformBlock macU {};
+    macU.Volume           = vol;
+    macU.MacCormackParams = { deltaTimeSeconds, settings.Dissipation, 0.0f, 0.0f };
+    if (BufMacCormackUbo_[slot].HostAddress) std::memcpy(BufMacCormackUbo_[slot].HostAddress, &macU, sizeof(macU));
+
     FluidThermodynamicsUniformBlock thermoU {};
     thermoU.Volume        = vol;
     thermoU.ThermoControl = { deltaTimeSeconds, settings.Cooling, settings.Combustion, settings.AmbientTemperature };
@@ -1637,6 +1652,42 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
         if (Encoder_.EncodeComputeDispatch(cmd, ProgInject_, s, gx, gy, gz)) ++dispatches;
         emitBarrier();
     }
+    if (UseMacCormack_ && ProgMacCormack_ != 0u)
+    {
+        // Selle et al. (2008) 3-pass MacCormack advection: forward -> ScratchA, backward -> ScratchB, correct -> State[srcIdx]
+        const std::array<ComputeSlotDescriptor, 5> sFwd {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgAdvect_, sFwd, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+
+        const std::array<ComputeSlotDescriptor, 5> sBwd {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchB_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgAdvect_, sBwd, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+
+        const std::array<ComputeSlotDescriptor, 7> sCor {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufMacCormackUbo_[slot].BufferHandle, sizeof(macU) },
+            { 1u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[dstIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchA_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgScratchB_.ViewHandle,         VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 5u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgState_[srcIdx].ViewHandle,    VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 6u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE,                  LinearSampler_, VK_IMAGE_LAYOUT_GENERAL }
+        }};
+        if (Encoder_.EncodeComputeDispatch(cmd, ProgMacCormack_, sCor, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+    else
     {
         const std::array<ComputeSlotDescriptor, 5> s {{
             { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufAdvectUbo_[slot].BufferHandle, sizeof(advU) },
@@ -1713,6 +1764,35 @@ void FluidVulkanGpuExecutor::DispatchGpuAsync(
             { 7u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufOccupancy_.BufferHandle,     VK_WHOLE_SIZE }
         }};
         if (Encoder_.EncodeComputeDispatch(cmd, ProgGradient_, s, gx, gy, gz)) ++dispatches;
+        emitBarrier();
+    }
+
+    if (ProgTracerUpdate_ != 0u || ProgDebrisUpdate_ != 0u)
+    {
+        struct alignas(16) TracerUboPod
+        {
+            FluidVolumeUniformBlock Volume;
+            float                   TracerTiming[4];
+            int32_t                 TracerDims[4];
+        } tUbo { vol, { deltaTimeSeconds, static_cast<float>(SimTime_), 3.0f, Telemetry_.CompletedTicks == 0ull ? 1.0f : 0.0f }, { 64, 32, 2048, 0 } };
+        if (BufTracerUbo_[slot].HostAddress != nullptr) std::memcpy(BufTracerUbo_[slot].HostAddress, &tUbo, sizeof(tUbo));
+        if (BufDebrisUbo_[slot].HostAddress != nullptr) std::memcpy(BufDebrisUbo_[slot].HostAddress, &vol, sizeof(vol));
+
+        const std::array<ComputeSlotDescriptor, 10> tdSlots {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufTracerUbo_[slot].BufferHandle,  192u },
+            { 1u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufDebrisUbo_[slot].BufferHandle,  512u },
+            { 2u, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  VK_NULL_HANDLE, 0ull, 0ull, ImgVelocity_[srcIdx].ViewHandle, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL },
+            { 3u, VK_DESCRIPTOR_TYPE_SAMPLER,        VK_NULL_HANDLE, 0ull, 0ull, VK_NULL_HANDLE, LinearSampler_, VK_IMAGE_LAYOUT_GENERAL },
+            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufTracers_[srcIdx].BufferHandle,   VK_WHOLE_SIZE },
+            { 5u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufTracers_[dstIdx].BufferHandle,   VK_WHOLE_SIZE },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufDebrisPos_[srcIdx].BufferHandle, VK_WHOLE_SIZE },
+            { 7u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufDebrisVel_[srcIdx].BufferHandle, VK_WHOLE_SIZE },
+            { 8u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufDebrisPos_[dstIdx].BufferHandle, VK_WHOLE_SIZE },
+            { 9u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufDebrisVel_[dstIdx].BufferHandle, VK_WHOLE_SIZE }
+        }};
+        const uint32_t tdGroups = (2048u + 63u) / 64u;
+        if (ProgTracerUpdate_ != 0u && Encoder_.EncodeComputeDispatch(cmd, ProgTracerUpdate_, tdSlots, tdGroups)) ++dispatches;
+        if (ProgDebrisUpdate_ != 0u && Encoder_.EncodeComputeDispatch(cmd, ProgDebrisUpdate_, tdSlots, tdGroups)) ++dispatches;
         emitBarrier();
     }
 

@@ -10,6 +10,7 @@
 #include "Engine/SimulationSpace/WorldSimulationSession.h"
 
 #include <algorithm>
+#include <chrono>
 #include <unordered_map>
 
 namespace Frontier::SimulationSpace
@@ -58,6 +59,12 @@ bool WorldSimulationSession::MountPreparedScene(const SimulationSceneDocument& s
     }
 
     ActiveScene_ = sceneDoc;
+    Profiler_.Reset();
+    BudgetGovernor_.Reset();
+    if (Checkpoints_)
+    {
+        Checkpoints_->PrewarmForCoordinator(*Coordinator_);
+    }
     RunStatus_   = PreviewRunStatus::Running;
     return true;
 }
@@ -121,9 +128,88 @@ void WorldSimulationSession::Tick(double deltaSeconds, const std::array<float, 3
     {
         return;
     }
+    const auto t0 = std::chrono::steady_clock::now();
     Coordinator_->AssignCameraWorldPosition(cameraWorldPos);
     const double clampedDt = std::clamp(deltaSeconds, 0.0005, 0.05);
     Sequence_->Tick(clampedDt);
+    const auto t1 = std::chrono::steady_clock::now();
+
+    const float elapsedUs = static_cast<float>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()) * 0.001f;
+    Profiler_.RecordTickMicros(Coordinator_->InspectTelemetry().CompletedTicks, elapsedUs);
+
+    if (BudgetGovernorEnabled_)
+    {
+        BudgetGovernor_.RecordStepDurationMs(elapsedUs * 0.001f);
+        BudgetGovernor_.ApplyToCoordinator(*Coordinator_);
+    }
+}
+
+bool WorldSimulationSession::StepSingleTick(
+    double fixedDeltaSeconds,
+    const std::array<float, 3>& cameraWorldPos) noexcept
+{
+    if (!Coordinator_ || !Sequence_ || RunStatus_ == PreviewRunStatus::Idle)
+    {
+        return false;
+    }
+
+    const bool wasPaused = (RunStatus_ == PreviewRunStatus::Paused);
+    if (wasPaused && !Sequence_->Resume())
+    {
+        return false;
+    }
+
+    const bool prevShouldUpdate = ShouldUpdate_;
+    Coordinator_->SetShouldUpdate(true);
+    Coordinator_->AssignCameraWorldPosition(cameraWorldPos);
+    const double clampedDt = std::clamp(fixedDeltaSeconds, 0.0005, 0.05);
+    const auto t0 = std::chrono::steady_clock::now();
+    Sequence_->Tick(clampedDt);
+    const auto t1 = std::chrono::steady_clock::now();
+    Coordinator_->SetShouldUpdate(prevShouldUpdate);
+
+    const float elapsedUs = static_cast<float>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()) * 0.001f;
+    Profiler_.RecordTickMicros(Coordinator_->InspectTelemetry().CompletedTicks, elapsedUs);
+
+    if (wasPaused)
+    {
+        (void)Sequence_->Suspend();
+    }
+    return true;
+}
+
+void WorldSimulationSession::EnableBudgetGovernor(const SimulationBudgetPolicy& policy) noexcept
+{
+    BudgetGovernor_        = SimulationBudgetGovernor(policy);
+    BudgetGovernorEnabled_ = true;
+    Profiler_.SetTargetBudgetMs(policy.TargetSimBudgetMs);
+}
+
+void WorldSimulationSession::EnableCheckpointRing(uint32_t ringCapacity)
+{
+    Checkpoints_ = std::make_unique<SimulationCheckpointBuffer>(ringCapacity);
+    if (Coordinator_)
+    {
+        Checkpoints_->PrewarmForCoordinator(*Coordinator_);
+    }
+}
+
+uint64_t WorldSimulationSession::CaptureCheckpoint()
+{
+    if (!Coordinator_) return 0ull;
+    if (!Checkpoints_)
+    {
+        EnableCheckpointRing(32u);
+    }
+    return Checkpoints_->Capture(*Coordinator_);
+}
+
+bool WorldSimulationSession::RewindToCheckpoint(uint32_t chronologicalOrdinal)
+{
+    if (!Coordinator_ || !Checkpoints_) return false;
+    return Checkpoints_->RestoreByOrdinal(chronologicalOrdinal, *Coordinator_);
 }
 
 void WorldSimulationSession::SetShouldUpdate(bool shouldUpdate) noexcept

@@ -310,6 +310,21 @@ struct ParticleAdditiveGpuPhysicsConfig
     float Restitution                    = 0.35f;
     float Friction                       = 0.45f;
     float ParticleRadiusMeters           = 0.04f;
+    uint32_t XpbdSubsteps                = 4u;
+};
+
+/// Packed host upload descriptor for Layer 220 GPU Orthotropic XPBD constraints (matches ParticleXpbdCompute.slang).
+struct ParticleXpbdGpuNetworkUpload
+{
+    uint32_t                  PointCount          = 0u;
+    uint32_t                  FaceCount           = 0u;
+    uint32_t                  DistanceCount       = 0u;
+    uint32_t                  SeamCount           = 0u;
+    uint32_t                  HingeCount          = 0u;
+    uint32_t                  DualFloatCount      = 0u;
+    std::span<const float>    PositionsInvMass4   {}; // PointCount * 4 floats
+    std::span<const uint32_t> TopologyWords       {}; // Packed U32Topology
+    std::span<const float>    RestTables          {}; // Packed F32Rest
 };
 
 /// Read-only GPU buffer feed snapshot consumed by SimulationGpuRenderFeed with zero CPU readback.
@@ -372,6 +387,10 @@ public:
         return AdditiveConfig_;
     }
 
+    /// Uploads a conflict-colored Layer 220 GPU XPBD network into device SSBOs (or tracks counts headlessly).
+    [[nodiscard]] bool UploadXpbdNetwork(const ParticleXpbdGpuNetworkUpload& networkUpload);
+    [[nodiscard]] uint32_t QueryUploadedXpbdPointCount() const noexcept { return XpbdPointCount_; }
+
     /// Binds a live GPU Fluid 3D velocity VkImageView (as uint64_t) for zero-copy GPU Fluid->Particle advection.
     /// Passing 0 or `gpuResident == false` falls back to the executor's internal 4x4x4 fallback gas volume.
     void BindExternalFluidVelocityView(uint64_t velocityImageViewHandle, bool gpuResident) noexcept
@@ -412,6 +431,12 @@ private:
     uint32_t                         MaxParticleCapacity_       = 4096u;
     uint32_t                         ActivePong_                = 0u;
     uint64_t                         ExternalFluidVelocityView_ = 0ull;
+    uint32_t                         XpbdPointCount_            = 0u;
+    uint32_t                         XpbdFaceCount_             = 0u;
+    uint32_t                         XpbdDistanceCount_         = 0u;
+    uint32_t                         XpbdSeamCount_             = 0u;
+    uint32_t                         XpbdHingeCount_            = 0u;
+    uint32_t                         XpbdDualFloatCount_        = 0u;
     ParticleAdditiveGpuPhysicsConfig AdditiveConfig_            {};
     ParticleGpuExecutorTelemetry     Telemetry_           {};
     SimulationSpace::AsyncGpuReadbackRing<ParticleRigidImpulseEntry, kTripleBufferSlots> ImpulseReadbackRing_ {};
@@ -473,10 +498,17 @@ private:
     GeometricRaster::DeviceBufferResource                 BufHashWriteOffs_  {};
     GeometricRaster::DeviceBufferResource                 BufHashBuckets_    {};
     GeometricRaster::DeviceBufferResource                 BufHashSortedIdx_  {};
+    GeometricRaster::DeviceBufferResource                 BufXpbdPosInvMass_ {};
+    GeometricRaster::DeviceBufferResource                 BufXpbdPrevPos_    {};
+    GeometricRaster::DeviceBufferResource                 BufXpbdVelocities_ {};
+    GeometricRaster::DeviceBufferResource                 BufXpbdTopology_   {};
+    GeometricRaster::DeviceBufferResource                 BufXpbdRestTables_ {};
+    GeometricRaster::DeviceBufferResource                 BufXpbdDuals_      {};
     GeometricRaster::DeviceImageResource                  ImgFallbackGas_    {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufUpdateUbo_ {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufCollisionUbo_ {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufHashUbo_ {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufXpbdUbo_ {};
     std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
 #endif
 };

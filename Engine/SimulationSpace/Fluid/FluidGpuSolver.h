@@ -484,14 +484,19 @@ private:
     GeometricRaster::DeviceBufferResource                 BufForceRecords_   {};
     GeometricRaster::DeviceBufferResource                 BufOccupancy_      {};
     std::array<GeometricRaster::DeviceBufferResource, 2>  BufTracers_        {};
+    std::array<GeometricRaster::DeviceBufferResource, 2>  BufDebrisPos_      {};
+    std::array<GeometricRaster::DeviceBufferResource, 2>  BufDebrisVel_      {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufInjectUbo_   {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufAdvectUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufMacCormackUbo_{};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufThermoUbo_   {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufForcesUbo_   {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufVortUbo_     {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDivUbo_      {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufPressUbo_    {};
     std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufGradUbo_     {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufTracerUbo_   {};
+    std::array<GeometricRaster::DeviceBufferResource, kTripleBufferSlots> BufDebrisUbo_   {};
     std::array<PendingCmd, kTripleBufferSlots>            InFlightCommands_  {};
 #endif
 };

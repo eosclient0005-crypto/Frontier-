@@ -1495,6 +1495,69 @@ ParticleGpuRenderFeedHandle ParticleVulkanGpuExecutor::InspectRenderFeedHandle()
     return feed;
 }
 
+bool ParticleVulkanGpuExecutor::UploadXpbdNetwork(const ParticleXpbdGpuNetworkUpload& networkUpload)
+{
+    if (networkUpload.PointCount == 0u || networkUpload.PositionsInvMass4.size() < static_cast<size_t>(networkUpload.PointCount) * 4u)
+    {
+        return false;
+    }
+
+    XpbdPointCount_     = networkUpload.PointCount;
+    XpbdFaceCount_      = networkUpload.FaceCount;
+    XpbdDistanceCount_  = networkUpload.DistanceCount;
+    XpbdSeamCount_      = networkUpload.SeamCount;
+    XpbdHingeCount_     = networkUpload.HingeCount;
+    XpbdDualFloatCount_ = std::max(1u, networkUpload.DualFloatCount);
+
+#if FRONTIER_PARTICLE_HAS_VULKAN
+    if (GpuLiveReady_ && Interchange_ != nullptr && Interchange_->Ready())
+    {
+        auto relBuf = [&](GeometricRaster::DeviceBufferResource& b)
+        {
+            if (b.BufferHandle != VK_NULL_HANDLE) Interchange_->ReleaseBuffer(b);
+        };
+        relBuf(BufXpbdPosInvMass_); relBuf(BufXpbdPrevPos_); relBuf(BufXpbdVelocities_);
+        relBuf(BufXpbdTopology_);   relBuf(BufXpbdRestTables_); relBuf(BufXpbdDuals_);
+
+        const uint64_t ptBytes   = static_cast<uint64_t>(XpbdPointCount_) * 16ull;
+        const uint64_t topoBytes = std::max<uint64_t>(64ull, static_cast<uint64_t>(networkUpload.TopologyWords.size()) * 4ull);
+        const uint64_t restBytes = std::max<uint64_t>(64ull, static_cast<uint64_t>(networkUpload.RestTables.size()) * 4ull);
+        const uint64_t dualBytes = static_cast<uint64_t>(XpbdDualFloatCount_) * 4ull;
+
+        BufXpbdPosInvMass_ = Encoder_.AllocateHostWritableBuffer(ptBytes,   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        BufXpbdPrevPos_    = Encoder_.AllocateHostWritableBuffer(ptBytes,   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        BufXpbdVelocities_ = Encoder_.AllocateHostWritableBuffer(ptBytes,   VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        BufXpbdTopology_   = Encoder_.AllocateHostWritableBuffer(topoBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        BufXpbdRestTables_ = Encoder_.AllocateHostWritableBuffer(restBytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+        BufXpbdDuals_      = Encoder_.AllocateDeviceLocalBuffer(dualBytes,  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+
+        if (BufXpbdPosInvMass_.HostAddress != nullptr)
+        {
+            std::memcpy(BufXpbdPosInvMass_.HostAddress, networkUpload.PositionsInvMass4.data(), ptBytes);
+        }
+        if (BufXpbdPrevPos_.HostAddress != nullptr)
+        {
+            std::memcpy(BufXpbdPrevPos_.HostAddress, networkUpload.PositionsInvMass4.data(), ptBytes);
+        }
+        if (BufXpbdVelocities_.HostAddress != nullptr)
+        {
+            std::memset(BufXpbdVelocities_.HostAddress, 0, ptBytes);
+        }
+        if (BufXpbdTopology_.HostAddress != nullptr && !networkUpload.TopologyWords.empty())
+        {
+            std::memcpy(BufXpbdTopology_.HostAddress, networkUpload.TopologyWords.data(),
+                        networkUpload.TopologyWords.size() * sizeof(uint32_t));
+        }
+        if (BufXpbdRestTables_.HostAddress != nullptr && !networkUpload.RestTables.empty())
+        {
+            std::memcpy(BufXpbdRestTables_.HostAddress, networkUpload.RestTables.data(),
+                        networkUpload.RestTables.size() * sizeof(float));
+        }
+    }
+#endif
+    return true;
+}
+
 bool ParticleVulkanGpuExecutor::PollAsyncImpulseReadback() noexcept
 {
 #if FRONTIER_PARTICLE_HAS_VULKAN
@@ -1644,6 +1707,7 @@ bool ParticleVulkanGpuExecutor::InitializeGpuResources(const std::filesystem::pa
         BufUpdateUbo_[s]    = Encoder_.AllocateHostWritableBuffer(sizeof(ParticleUpdateUniformBlock), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         BufCollisionUbo_[s] = Encoder_.AllocateHostWritableBuffer(64ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
         BufHashUbo_[s]      = Encoder_.AllocateHostWritableBuffer(64ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+        BufXpbdUbo_[s]      = Encoder_.AllocateHostWritableBuffer(128ull, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     }
 
     if (BufStates_[0].BufferHandle == VK_NULL_HANDLE || BufStates_[1].BufferHandle == VK_NULL_HANDLE ||
@@ -1683,9 +1747,12 @@ void ParticleVulkanGpuExecutor::ReleaseGpuResources() noexcept
         relBuf(BufImpulseAtomic_);
         relBuf(BufHashCounts_); relBuf(BufHashOffsets_); relBuf(BufHashBlockSums_);
         relBuf(BufHashWriteOffs_); relBuf(BufHashBuckets_); relBuf(BufHashSortedIdx_);
+        relBuf(BufXpbdPosInvMass_); relBuf(BufXpbdPrevPos_); relBuf(BufXpbdVelocities_);
+        relBuf(BufXpbdTopology_); relBuf(BufXpbdRestTables_); relBuf(BufXpbdDuals_);
         for (auto& u : BufUpdateUbo_) relBuf(u);
         for (auto& u : BufCollisionUbo_) relBuf(u);
         for (auto& u : BufHashUbo_) relBuf(u);
+        for (auto& u : BufXpbdUbo_) relBuf(u);
         if (ImgFallbackGas_.ImageHandle != VK_NULL_HANDLE) Interchange_->ReleaseImage2D(ImgFallbackGas_);
         if (LinearSampler_ != VK_NULL_HANDLE)
         {
@@ -1881,6 +1948,71 @@ void ParticleVulkanGpuExecutor::DispatchGpuAsync(
         runHash(ProgHashScatter_,    groupsX);
         runHash(ProgHashResolve_,    groupsX);
         liveStateIdx = nextIdx;
+    }
+
+    // Layer 220: 7-stage Conflict-Colored GPU Orthotropic XPBD Compute (matches ParticleXpbdCompute.slang 128B UBO)
+    if (AdditiveConfig_.EnableXpbdConstraints && Telemetry_.XpbdPipelineReady &&
+        XpbdPointCount_ > 0u && BufXpbdPosInvMass_.BufferHandle != VK_NULL_HANDLE)
+    {
+        emitBarrier();
+        const uint32_t substeps = std::clamp(AdditiveConfig_.XpbdSubsteps, 1u, 8u);
+        const float subDt = deltaTimeSeconds / static_cast<float>(substeps);
+        const float invDt = (subDt > 1.0e-6f) ? (1.0f / subDt) : 0.0f;
+        struct alignas(16) XpbdUboPod
+        {
+            float    TimeControl[4];
+            float    GravityDampWind[4];
+            float    MembraneModuli[4];
+            float    CrimpCompShear[4];
+            float    BendFriction[4];
+            uint32_t CountsBatch[4];
+            uint32_t DualOffsets[4];
+            float    WindAeroFlags[4];
+        } xUbo {
+            { subDt, invDt, invDt * invDt, 1.0e-6f },
+            { -9.81f, 0.992f, 0.0f, 0.0f },
+            { 1800.0f, 1800.0f, 650.0f, 2400.0f },
+            { 0.0f, 0.0f, 0.35f, 0.45f },
+            { 0.25f, AdditiveConfig_.Friction, 0.0f, 35.0f },
+            { XpbdPointCount_, 0u, XpbdDistanceCount_, uploadedProxies },
+            { XpbdFaceCount_, 0u, XpbdHingeCount_, XpbdHingeCount_ + XpbdSeamCount_ },
+            { 0.0f, 0.4f, AdditiveConfig_.ParticleRadiusMeters, 0.0f }
+        };
+        if (BufXpbdUbo_[slot].HostAddress != nullptr)
+        {
+            std::memcpy(BufXpbdUbo_[slot].HostAddress, &xUbo, sizeof(xUbo));
+        }
+        const std::array<ComputeSlotDescriptor, 8> xSlots {{
+            { 0u, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, BufXpbdUbo_[slot].BufferHandle,    sizeof(xUbo) },
+            { 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufXpbdPosInvMass_.BufferHandle,   VK_WHOLE_SIZE },
+            { 2u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufXpbdPrevPos_.BufferHandle,      VK_WHOLE_SIZE },
+            { 3u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufXpbdVelocities_.BufferHandle,   VK_WHOLE_SIZE },
+            { 4u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufXpbdTopology_.BufferHandle,     VK_WHOLE_SIZE },
+            { 5u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufXpbdRestTables_.BufferHandle,   VK_WHOLE_SIZE },
+            { 6u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufXpbdDuals_.BufferHandle,        VK_WHOLE_SIZE },
+            { 7u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, BufRigidProxies_.BufferHandle,     VK_WHOLE_SIZE }
+        }};
+        const uint32_t ptGroups   = (XpbdPointCount_ + 63u) / 64u;
+        const uint32_t dualGroups = (XpbdDualFloatCount_ + 63u) / 64u;
+        auto runXpbd = [&](uint32_t prog, uint32_t gx)
+        {
+            if (prog != 0u && gx > 0u && Encoder_.EncodeComputeDispatch(cmd, prog, xSlots, gx))
+            {
+                Telemetry_.TotalDispatches           += 1ull;
+                Telemetry_.AdditivePhysicsDispatches += 1ull;
+                emitBarrier();
+            }
+        };
+        for (uint32_t s = 0u; s < substeps; ++s)
+        {
+            runXpbd(ProgXpbdPredict_,   ptGroups);
+            runXpbd(ProgXpbdResetDual_, dualGroups);
+            if (XpbdDistanceCount_ > 0u) runXpbd(ProgXpbdDistance_, (XpbdDistanceCount_ + 63u) / 64u);
+            if (XpbdSeamCount_ > 0u)     runXpbd(ProgXpbdSeam_,     (XpbdSeamCount_ + 63u) / 64u);
+            if (XpbdFaceCount_ > 0u)     runXpbd(ProgXpbdFace_,     (XpbdFaceCount_ + 63u) / 64u);
+            if (XpbdHingeCount_ > 0u)    runXpbd(ProgXpbdHinge_,    (XpbdHingeCount_ + 63u) / 64u);
+            runXpbd(ProgXpbdFinalize_,  ptGroups);
+        }
     }
 
     ActivePong_ = liveStateIdx;

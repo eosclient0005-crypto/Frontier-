@@ -15,7 +15,10 @@
 #include "Engine/Lifecycle/LifecycleSequence.h"
 #include "Engine/SimulationSpace/ComponentClassSimulationAssembler.h"
 #include "Engine/SimulationSpace/ComponentSimulationPreviewDriver.h"
+#include "Engine/SimulationSpace/SimulationBudgetGovernor.h"
+#include "Engine/SimulationSpace/SimulationCheckpointBuffer.h"
 #include "Engine/SimulationSpace/SimulationGpuRenderFeed.h"
+#include "Engine/SimulationSpace/SimulationTelemetryProfiler.h"
 
 #include <array>
 #include <cstdint>
@@ -58,9 +61,39 @@ public:
     /// Advances the active world simulation by `deltaSeconds` with the viewer's live world camera position.
     void Tick(double deltaSeconds, const std::array<float, 3>& cameraWorldPos = { 4.10f, 2.35f, 4.95f }) noexcept;
 
+    /// Deterministic single-step advance usable even while Paused (for frame-by-frame scrubbing & debugging).
+    [[nodiscard]] bool StepSingleTick(
+        double fixedDeltaSeconds = 1.0 / 60.0,
+        const std::array<float, 3>& cameraWorldPos = { 4.10f, 2.35f, 4.95f }) noexcept;
+
     [[nodiscard]] bool Pause() noexcept;
     [[nodiscard]] bool Resume() noexcept;
     void               Stop() noexcept;
+
+    /// Enables or disables automatic adaptive budget governing (248 FPS / 120 FPS / 60 FPS quality tier protection).
+    void EnableBudgetGovernor(const SimulationBudgetPolicy& policy = {}) noexcept;
+    void DisableBudgetGovernor() noexcept { BudgetGovernorEnabled_ = false; }
+    [[nodiscard]] bool QueryBudgetGovernorEnabled() const noexcept { return BudgetGovernorEnabled_; }
+    [[nodiscard]] const SimulationBudgetTelemetry& InspectBudgetTelemetry() const noexcept
+    {
+        return BudgetGovernor_.InspectTelemetry();
+    }
+
+    /// Enables and pre-warms the deterministic checkpoint ring for zero-allocation capture & instant rewind.
+    void EnableCheckpointRing(uint32_t ringCapacity = 32u);
+    [[nodiscard]] uint64_t CaptureCheckpoint();
+    [[nodiscard]] bool     RewindToCheckpoint(uint32_t chronologicalOrdinal);
+    [[nodiscard]] uint32_t QueryCheckpointCount() const noexcept
+    {
+        return Checkpoints_ ? Checkpoints_->QueryCount() : 0u;
+    }
+
+    /// Zero-allocation wall-clock timing percentiles (p50 / p95 / p99 / peak microseconds) across recent ticks.
+    [[nodiscard]] SimulationTimingPercentiles InspectTimingPercentiles() const noexcept
+    {
+        return Profiler_.ComputePercentiles();
+    }
+    [[nodiscard]] const SimulationTelemetryProfiler& InspectProfiler() const noexcept { return Profiler_; }
 
     /// Edit-mode / runtime fast-skip toggle (when false, Tick() returns immediately in 0.00 ms).
     void               SetShouldUpdate(bool shouldUpdate) noexcept;
@@ -101,6 +134,10 @@ private:
     SimulationSceneDocument                         ActiveScene_    {};
     std::unique_ptr<SimulationCoordinatorExtension> Coordinator_    {};
     std::unique_ptr<Lifecycle::LifecycleSequence>   Sequence_       {};
+    SimulationBudgetGovernor                        BudgetGovernor_ {};
+    bool                                            BudgetGovernorEnabled_ = false;
+    std::unique_ptr<SimulationCheckpointBuffer>     Checkpoints_    {};
+    SimulationTelemetryProfiler                     Profiler_       {};
 };
 
 } // namespace Frontier::SimulationSpace
