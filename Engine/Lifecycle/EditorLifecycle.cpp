@@ -2526,6 +2526,13 @@ bool EditorLifecycle::ExecuteExternalDesktopTick(double Δt)
     CurrentStepSeconds    = SafeStep;
 
     Workspaces.Tick(SafeStep);
+    if (WorldSimulation.QueryPlaying() && SafeStep > 0.0)
+    {
+        const std::array<float, 3> camWorldPos {
+            DesiredCameraOrigin.X, DesiredCameraOrigin.Y, DesiredCameraOrigin.Z
+        };
+        WorldSimulation.Tick(SafeStep, camWorldPos);
+    }
     if (ShowcaseBundle != nullptr)
     {
         if (WorkspaceSessionPanes* Panes = Workspaces.AccessActivePanes())
@@ -3221,6 +3228,7 @@ void EditorLifecycle::Finalize() noexcept
             ActiveExt->RequestCursorConfinement(Input::CursorConfinementMode::FreeVisible);
         }
     }
+    WorldSimulation.Stop();
     EditorSequence.Finalize();
     if (StartupConfig.ImGuiPresenter != nullptr)
     {
@@ -3247,6 +3255,20 @@ void EditorLifecycle::Finalize() noexcept
     InspectorPaneToken   = {};
     Initialized          = false;
     TerminationRequested = false;
+}
+
+bool EditorLifecycle::BeginWorldSimulationPlay(std::string* OutError)
+{
+    return WorldSimulation.BeginPlayFromWorldPlacements(
+        ComponentDefinitions,
+        WorldPlacements,
+        ActiveProjectTitle.empty() ? "FrontierWorldPlay" : ActiveProjectTitle,
+        OutError);
+}
+
+bool EditorLifecycle::BeginWorldSimulationFromSceneFile(const std::filesystem::path& ScenePath, std::string* OutError)
+{
+    return WorldSimulation.BeginPlayFromSceneFile(ScenePath, OutError);
 }
 
 EditorLifecycleReading EditorLifecycle::InspectReading() const noexcept
