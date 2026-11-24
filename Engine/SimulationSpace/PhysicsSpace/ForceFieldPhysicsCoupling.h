@@ -1,8 +1,8 @@
 /*============================================================================================================================================
                                                        FORCEFIELDPHYSICSCOUPLING.H
 ============================================================================================================================================*/
-// 🧩 Wait-free ForceFieldRegister -> JoltPhysics rigid body & vehicle aerodynamic coupling + Stage F GPU impulse readback contract
-// Reference: UnifiedFluidParticleForceFieldPortPlan.md §1.4 & §2.2A (Slice S06)
+// 🧩 Wait-free ForceFieldRegister -> JoltPhysics rigid body & vehicle aerodynamic coupling + Stage F (Slice S24) two-way GPU collision readback
+// Reference: UnifiedFluidParticleForceFieldPortPlan.md §1.4 & §2.2A (Slices S06 & S24), BroadphaseSolver.{h,cpp}
 
 #pragma once
 
@@ -11,8 +11,10 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Engine/Mathematics/AxisCoordinates.h"
+#include "Engine/ParticleSpace/ParticleGpuSimulation.h"
 #include "Engine/SimulationSpace/ForceFields/ForceFieldRegister.h"
 #include "Engine/SimulationSpace/ForceFields/ForceFieldSampler.h"
+#include "Engine/SimulationSpace/PhysicsSpace/BroadphaseSolver.h"
 #include "Engine/SimulationSpace/PhysicsSpace/RigidBodyDynamics.h"
 
 #include <array>
@@ -28,6 +30,9 @@ class PhysicsExtension;
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     DATA STRUCTURES
 //------------------------------------------------------------------------------------------------------------------------
+
+inline constexpr float    kRigidImpulseFixedScale  = 100000.0f; // [1/(N*s)] - Fixed-point scale for GPU InterlockedAdd
+inline constexpr uint32_t kCompoundHullShapeCode   = 3u;        // [enum]    - RigidColliderProxy::ShapeCode for baked 3D SDF hull
 
 enum class ForceCouplingMode : uint8_t
 {
@@ -54,7 +59,7 @@ struct ForceCouplingStepSummary
     float    TotalForceNewtons   = 0.0f; // [N]     - Sum of force magnitudes applied this tick
 };
 
-/// 64-byte GPU->CPU atomic impulse readback entry (shared contract for Stage F Slice S24 two-way particle-rigid coupling).
+/// 64-byte GPU->CPU impulse readback entry (shared contract for Stage F Slice S24 two-way particle-rigid coupling).
 struct alignas(16) RigidImpulseAccumulatorEntry
 {
     RigidBodyToken BodyToken       {};                   // [id]    - Target dynamic Jolt body
@@ -64,8 +69,58 @@ struct alignas(16) RigidImpulseAccumulatorEntry
     float          AngularImpulse[4]= { 0.0f, 0.0f, 0.0f, 0.0f }; // [N*m*s] - xyz = net angular impulse about COM
     float          ContactPoint[4] = { 0.0f, 0.0f, 0.0f, 0.0f };  // [m]     - xyz = weighted average contact point
 };
-
 static_assert(sizeof(RigidImpulseAccumulatorEntry) == 64u, "RigidImpulseAccumulatorEntry must remain 64 bytes.");
+
+/// Matches CompoundHullSdfHeaderGpu in ParticleCollisionCompute.slang byte-for-byte (48 bytes).
+struct alignas(16) CompoundHullSdfHeaderGpu
+{
+    std::array<float, 4>    BoundsMinCellSize { 0.0f, 0.0f, 0.0f, 0.1f }; // xyz = local AABB min, w = voxel cell size
+    std::array<uint32_t, 4> GridDimOffset     { 0u, 0u, 0u, 0u };         // xyz = dims, w = offset in voxel table
+    std::array<uint32_t, 4> BodySlotPad       { 0u, 0u, 0u, 0u };         // x = matching BodySlotIndex
+};
+static_assert(sizeof(CompoundHullSdfHeaderGpu) == 48u, "CompoundHullSdfHeaderGpu must be 48 bytes.");
+
+/// Matches RigidImpulseAtomicGpu in ParticleCollisionCompute.slang byte-for-byte (48 bytes).
+struct alignas(16) RigidImpulseAtomicGpu
+{
+    int32_t  LinearImpulseFixed[3]   { 0, 0, 0 };
+    uint32_t ContactCount            = 0u;
+    int32_t  AngularImpulseFixed[3]  { 0, 0, 0 };
+    uint32_t BodySlotIndex           = 0u;
+    int32_t  ContactPointSumFixed[3] { 0, 0, 0 };
+    uint32_t ReservedPad             = 0u;
+};
+static_assert(sizeof(RigidImpulseAtomicGpu) == 48u, "RigidImpulseAtomicGpu must be 48 bytes.");
+
+/// Matches ParticleCollisionUniformBlock in ParticleCollisionCompute.slang byte-for-byte (128 bytes).
+struct alignas(16) ParticleCollisionUniformBlock
+{
+    std::array<std::array<float, 4>, 4> AnalyticColliders {};
+    std::array<float, 4>                GroundHeightFlags { 0.0f, 0.0f, 0.0f, 0.0f }; // groundY, groundEnabled, analyticCount, particleCount
+    std::array<float, 4>                ParticleMaterial  { 0.05f, 0.1f, 0.35f, 0.4f }; // radius, mass, restitution, friction
+    std::array<uint32_t, 4>             CountsMasks       { 0u, 0u, 0xFFFFFFFFu, 1u }; // proxyCount, hullCount, channelMask, twoWayEnabled
+    std::array<float, 4>                ScaleLifetime     { kRigidImpulseFixedScale, 0.0f, 500.0f, 0.0f }; // fixedScale, lifetime, maxImpulse, pad
+};
+static_assert(sizeof(ParticleCollisionUniformBlock) == 128u, "ParticleCollisionUniformBlock must be 128 bytes.");
+
+struct CompoundHullSubSphere
+{
+    std::array<float, 3> LocalCenterMeters { 0.0f, 0.0f, 0.0f };
+    float                RadiusMeters      = 0.25f;
+};
+
+struct CompoundHullSdfBank
+{
+    std::vector<CompoundHullSdfHeaderGpu> Headers {};
+    std::vector<float>                    Voxels  {};
+
+    /// Bakes a union of sub-spheres into a local-space 3D signed-distance field appended to this bank.
+    void AppendSphereUnionHull(
+        uint32_t bodySlotIndex,
+        std::span<const CompoundHullSubSphere> subSpheres,
+        float cellSizeMeters = 0.08f,
+        float paddingMeters  = 0.20f);
+};
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                           PURE FORCE COUPLING COMPUTATION
@@ -87,6 +142,26 @@ static_assert(sizeof(RigidImpulseAccumulatorEntry) == 64u, "RigidImpulseAccumula
     float dragCoefficient,
     float airDensityKgPerM3,
     double simulationSeconds) noexcept;
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                 SLICE S24 CPU COLLISION MIRROR & READBACK DECODER
+//------------------------------------------------------------------------------------------------------------------------
+
+/// Exact CPU mirror of ParticleCollisionCompute.slang::ComputeEntry (analytic + 80-byte RigidColliderProxy + CompoundHull SDF + atomic readback).
+void ResolveParticleRigidCollisionsCpu(
+    const ParticleCollisionUniformBlock& uniforms,
+    std::span<Frontier::ParticleSpace::ParticleStateGpuRecord> particles,
+    std::span<const RigidColliderProxy> proxies,
+    std::span<const std::array<float, 4>> proxyAngularVelocities,
+    const CompoundHullSdfBank& hullBank,
+    std::vector<RigidImpulseAtomicGpu>& outAtomics);
+
+/// Decodes GPU fixed-point RigidImpulseAtomicGpu readback entries into floating-point RigidImpulseAccumulatorEntry records.
+void DecodeGpuImpulseReadback(
+    std::span<const RigidImpulseAtomicGpu> atomics,
+    std::span<const RigidBodyToken> proxyBodyTokens,
+    float fixedPointScale,
+    std::vector<RigidImpulseAccumulatorEntry>& outEntries);
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                               FORCEFIELDPHYSICSCOUPLING

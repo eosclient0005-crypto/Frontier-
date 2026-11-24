@@ -635,6 +635,7 @@ frontier_compile_particlespace_slang_shader(ParticleCarrierSolidRasterization.sl
 frontier_compile_particlespace_slang_shader(ParticleCarrierSolidRasterization.slang ParticleCarrierSolidFragmentEntry fragment ParticleCarrierSolid.frag.spv)
 frontier_compile_particlespace_slang_shader(ParticleStrandRasterization.slang       ParticleStrandVertexEntry         vertex   ParticleStrand.vert.spv)
 frontier_compile_particlespace_slang_shader(ParticleStrandRasterization.slang       ParticleStrandFragmentEntry       fragment ParticleStrand.frag.spv)
+frontier_compile_particlespace_slang_shader(ParticleCollisionCompute.slang          ComputeEntry                      compute  ParticleCollisionCompute.comp.spv)
 
 function(frontier_compile_fluid_slang_shader SLANG_REL_PATH ENTRY_NAME SHADER_UNIT OUT_SPV_NAME)
     set(IN_SLANG "${CMAKE_SOURCE_DIR}/Engine/Shaders/Fluid/${SLANG_REL_PATH}")
