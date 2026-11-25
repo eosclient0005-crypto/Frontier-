@@ -12,6 +12,7 @@ on:
       - 'Engine/**'
       - 'EngineContent/**'
       - 'Exhibits/**'
+      - 'Projects/**'
       - 'ExternalPackages/**'
   workflow_dispatch:
 
@@ -75,7 +76,7 @@ jobs:
           run_step retry python3 Automation/PrepareFonts.py
           run_step retry python3 Automation/PrepareShaderToolchain.py
 
-      - name: Build Frontier and SolidArc across profiles
+      - name: Build Frontier, SolidArc, and AutoSpace across profiles
         env:
           CMAKE_BUILD_PARALLEL_LEVEL: 4
         run: |
@@ -84,13 +85,15 @@ jobs:
             -DFRONTIER_PROFILE=Editor \
             -DBUILD_TESTING=OFF
           cmake --build Build/CI/Editor --parallel 4 --target \
-            Frontier FrontierSketcher \
+            Frontier FrontierSketcher AutoSpace \
             FrontierEngineRuntimeDll FrontierWorkspaceUiDll
+          ./Build/CI/Editor/Projects/AutoSpace/AutoSpace --verify
           cmake -S . -B Build/CI/Shipping -G Ninja \
             -DFRONTIER_PROFILE=Shipping \
             -DBUILD_TESTING=OFF
           cmake --build Build/CI/Shipping --parallel 4 --target \
-            FrontierEngine FrontierEngineRuntimeDll
+            FrontierEngine FrontierEngineRuntimeDll AutoSpace
+          ./Build/CI/Shipping/Projects/AutoSpace/AutoSpace --verify
 
       - name: Assemble portable Linux x64 Frontier and SolidArc package
         run: |
