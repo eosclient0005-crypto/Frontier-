@@ -10,3 +10,5 @@ out/
 *.log
 imgui.ini
 Projects/*/Saved/
+EngineContent/FontsArchives/
+Logs/

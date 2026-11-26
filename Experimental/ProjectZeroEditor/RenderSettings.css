@@ -1,0 +1,340 @@
+/* The camera's Camera Settings component (RenderComponents.jsx). Neutral cards; colour only on dots, studies and the active marks. */
+.rc-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.property-card.rs-card .rs-graphic {
+  margin: 14px 0 10px;
+  padding: 8px 6px 4px;
+  border-radius: 14px;
+  background: #161616;
+  border: 1px solid #ffffff0a;
+}
+.rs-study {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+}
+.rs-study text {
+  font: 10.5px "DM Sans", sans-serif;
+  fill: #8a8a8a;
+}
+.property-card .rs-note,
+.rs-note {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #8f8f8f;
+  margin: 4px 0 12px;
+}
+
+.rc-reset button {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid #ffffff18;
+  background: #2a2a2a;
+  color: #e6e6e6;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.rc-reset button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.rc-reset {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 4px;
+  font-size: 10px;
+  color: #8a8a8a;
+}
+
+/* Radio tiles, segments. */
+.rc-tiles {
+  display: grid;
+  grid-template-columns: repeat(var(--rc-columns, 2), minmax(0, 1fr));
+  gap: 6px;
+  margin: 4px 0 12px;
+}
+.rc-tiles button,
+.rc-rail button {
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: #cfcfcf;
+  background: #161616;
+  border: 1px solid #ffffff0d;
+}
+.rc-tiles button {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border-radius: 12px;
+}
+.rc-tiles b {
+  font-size: 11px;
+  font-weight: 500;
+}
+.rc-tiles small {
+  font-size: 9.5px;
+  line-height: 1.35;
+  color: #7a7a7a;
+}
+.rc-tiles button[aria-checked="true"],
+.rc-rail button[aria-pressed="true"] {
+  background: #2c2c2c;
+  border-color: #ffffff30;
+  color: #f2f2f2;
+}
+.rc-segments {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  margin: 4px 0 12px;
+  border-radius: 999px;
+  background: #121212;
+  border: 1px solid #ffffff0b;
+}
+.rc-segments button {
+  flex: 1;
+  min-height: 28px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #9a9a9a;
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.rc-segments button[aria-checked="true"] {
+  background: #e6e6e6;
+  color: #141414;
+}
+
+/* MatCap: the shaded sphere. */
+.rc-matcap-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 12px;
+  padding: 14px 0 10px;
+  border-radius: 14px;
+  background: radial-gradient(circle at 50% 40%, #262626, #141414 70%);
+  border: 1px solid #ffffff0a;
+}
+.rc-matcap {
+  width: 180px;
+  height: 180px;
+  cursor: crosshair;
+  touch-action: none;
+}
+.rc-matcap-stage small {
+  font-size: 9.5px;
+  color: #7a7a7a;
+}
+
+/* SDF: the penumbra rail. */
+.rc-rail {
+  list-style: none;
+  margin: 4px 0 4px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rc-rail button {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 12px;
+}
+.rc-rail span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rc-rail b {
+  font-size: 11px;
+  font-weight: 500;
+}
+.rc-rail small {
+  font-size: 9.5px;
+  color: #7a7a7a;
+  line-height: 1.35;
+}
+
+/* Global button rules centre content; these choices read left to right. */
+.property-card .rc-tiles button,
+.property-card .rc-rail button {
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: left;
+}
+.rc-segments button {
+  min-width: 0;
+  padding: 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-segments:has(> :nth-child(5)) button {
+  font-size: 9.5px;
+}
+
+/* Follow-up 48: captions above the specification segment rows (reflection source, trace resolution). */
+.rc-caption {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--muted, #9aa3ad);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Follow-up 77: the Overview page. Render type: four cards (thumbnail, name, what it draws, its pages); the chosen renderer's card
+   lists one line per page and opens it. */
+.rc-type-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 3px;
+  padding: 12px 12px 14px;
+  border-radius: 12px;
+  background: radial-gradient(70% 90% at 30% 50%, #2b3038, #15171b 80%);
+  box-shadow: inset 0 0 0 1px #ffffff0e;
+}
+.rc-type-hero b {
+  margin-top: 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #f1f1f1;
+}
+.rc-type-hero small {
+  font-size: 10px;
+  color: #9aa0a8;
+}
+.rc-type-hero .rc-type-pages {
+  justify-content: center;
+  margin-top: 6px;
+}
+.rc-type-thumb {
+  display: block;
+  width: 100%;
+  height: 34px;
+}
+.rc-type-thumb.large {
+  width: 70%;
+  height: 112px;
+  filter: drop-shadow(0 8px 10px #0008);
+}
+.rc-types {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+  margin: 10px 0 4px;
+}
+.property-card .rc-types button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 14px 2px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #ffffff06;
+  box-shadow: inset 0 0 0 1px #ffffff10;
+  color: #a9adb3;
+  font: inherit;
+  font-size: 9.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.rc-types button i {
+  position: absolute;
+  left: 7px;
+  top: 5px;
+  font: 700 9px var(--mono, ui-monospace, monospace);
+  font-style: normal;
+  color: #ffffff60;
+}
+.rc-types button span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.property-card .rc-types button.on {
+  background: #ffffff10;
+  box-shadow: inset 0 0 0 1px #f2f2f2a0;
+  color: #fff;
+}
+.rc-types button.on i {
+  color: #ff3b30;
+}
+.rc-type-pages {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.rc-type-pages em {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #ffffff10;
+  color: #d9d4ca;
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.02em;
+}
+.rc-page-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.rc-page-list li + li {
+  border-top: 1px solid #ffffff0b;
+}
+.rc-page-list button {
+  display: grid;
+  grid-template-columns: 86px 1fr 12px;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 2px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rc-page-list button span {
+  font-size: 10.5px;
+  color: #8f8f8f;
+}
+.rc-page-list button b {
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: #e8e8e8;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-page-list button svg {
+  color: #6f6f6f;
+}
+.rc-page-list button:hover b,
+.rc-page-list button:hover svg {
+  color: #fff;
+}

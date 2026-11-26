@@ -1,0 +1,64 @@
+[PASS] Load FontRepository.FontSpace
+[PASS] Dynamic breadcrumb resolves custom folder 'Inspector / Sky Rig'
+[PASS] Dynamic breadcrumb resolves custom folder 'Inspector / Weather Rig'
+[PASS] Dynamic breadcrumb resolves top-level entry as 'Inspector / Scene'
+[PASS] Multi-instance 2 Suns combine cleanly (1.2 + 0.8 = 2.0x)
+[PASS] Multi-instance 2 Moons populate independent slots with distinct presets
+[PASS] Multi-instance 2 Winds combine cleanly via vector sum (8 + 6 = 14 m/s)
+[PASS] Multi-instance 2 Starfields combine cleanly (1.0 + 0.75 = 1.75)
+[PASS] Multi-instance 2 Height Fogs combine cleanly (0.03 + 0.02 = 0.05)
+[PASS] All 7 active luminaire instances sync live into WorldSceneSpecification (PointLights & Heitz LTC AreaLights)
+[PASS] 01-Atmosphere-Overview.png
+[PASS] 02-Atmosphere-Baking.png
+[FAIL] F76 Atmosphere LUT cards remain Unbaked (0 uploads) until explicit Bake click
+[PASS] 03-Sun-Overview.png
+[PASS] 04-Clouds-Overview.png
+[PASS] 05-Moon-Overview.png
+[PASS] 16-Moon-Appearance.png
+[PASS] 06-Stars-Overview.png
+[PASS] 07-Stars-Baking.png
+[FAIL] F76 Starfield baked sheet remains Unbaked (0 uploads) until explicit Bake click
+[PASS] 08-Wind-Overview.png
+[PASS] 09-HeightFog-Overview.png
+[PASS] 10-Camera-Overview.png
+[PASS] 11-PointLight-Overview.png
+[FAIL] Point Light radial falloff blueprint runs pure-vector (0 uploads)
+[PASS] 20-SpotLight-Overview.png
+[FAIL] Spot Light beam envelope blueprint runs pure-vector (0 uploads)
+[PASS] 21-IesLight-Overview.png
+[FAIL] IES Light auto-detects ECE Low Beam polar lobe & runs pure-vector (0 uploads)
+[PASS] 22-AreaLight-Overview.png
+[FAIL] Area/Softbox Light aperture blueprint runs pure-vector (0 uploads)
+[PASS] 23-TubeLight-Overview.png
+[FAIL] Tube Light linear radiance blueprint runs pure-vector (0 uploads)
+[PASS] 24-LedLight-Overview.png
+[FAIL] LED Emitter COB die-array blueprint runs pure-vector (0 uploads)
+[PASS] 25-LedStrip-Overview.png
+[FAIL] LED Strip ribbon blueprint runs pure-vector (0 uploads)
+[PASS] 12-EnvironmentLight-Overview.png
+[FAIL] Environment Light hemisphere blueprint runs pure-vector (0 uploads)
+[PASS] 13-PostProcess-Overview.png
+[PASS] 14-AnalyticPrimitive-Overview.png
+[PASS] Category 1 Analytical Primitive auto-detects Torus & stays at 1 retained upload
+[PASS] 14-AnalyticCube-Overview.png
+[PASS] Category 1 Analytical Primitive identifies Cube
+[PASS] 17-NativeGeometry-Overview.png
+[PASS] Category 2 Native Engine Geometry stays at 1 retained upload across static frames
+[PASS] 18-ImportedGeometry-Overview.png
+[PASS] Category 3 Imported Geometry auto-detects STEP format & stays at 1 retained upload
+[PASS] 19-ProceduralGeometry-Overview.png
+[PASS] Category 4 Procedural Geometry auto-detects Terrain Field & stays at 1 retained upload
+[PASS] 15-Folder-Overview.png
+[PASS] 26-CameraSettings-Overview.png
+[FAIL] Camera Settings Render Type hero runs pure-vector (0 uploads)
+[PASS] 27-CameraSettings-RayTraced.png
+[PASS] Switching Camera Settings renderer preserves per-renderer parameters independently
+[PASS] 28-Camera-Mount.png
+[PASS] 30-Atmosphere-BakeSettings.png
+[PASS] 29-Atmosphere-BakingTooltip.png
+[PASS] ProjectInspectorHost scans & parses <ProjectRoot>/Inspectors/*.Inspector.toml cleanly
+[PASS] ProjectInspectorHost resolves blueprint for project:vehicle-aero
+[PASS] Project User UI Inspector preserves independent multi-instance readings per Outliner entry
+[PASS] 31-ProjectCustomInspector-Overview.png
+[PASS] All 31 native standalone inspectors + Project User UI Inspector foundation exercised cleanly
+[ThoughtLog] Flushed 49 samples from 1 scopes to /home/user/Frontier-/Logs/FrontierThoughtLog.txt

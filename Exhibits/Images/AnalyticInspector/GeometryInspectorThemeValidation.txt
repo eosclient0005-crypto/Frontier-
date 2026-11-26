@@ -1,0 +1,7 @@
+Test project /home/user/Frontier-/.cache/native-build
+    Start 12: GeometryInspectorThemeValidation
+1/1 Test #12: GeometryInspectorThemeValidation ...   Passed    0.01 sec
+
+100% tests passed out of 1
+
+Total Test time (real) =   0.01 sec

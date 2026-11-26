@@ -199,6 +199,7 @@ int main()
     const OutlinerSlotToken PostFxTok     = AppendEntry(Outliner, "Filmic Grade",       "Post Process",        "env:post-process",    ConstructSlotCategory::LayerGroup,     {});
     // All 4 Geometry Categories: (1) Analytical Primitive, (2) Native Engine Geometry, (3) Imported Geometry, (4) Procedural Geometry
     const OutlinerSlotToken AnalyticTok   = AppendEntry(Outliner, "Titanium Torus",     "Torus Primitive",     "geom:primitive",      ConstructSlotCategory::GeometryVolume, PropsFolder);
+    const OutlinerSlotToken CubeTok       = AppendEntry(Outliner, "Cube",               "Cube Primitive",      "geom:primitive",      ConstructSlotCategory::GeometryVolume, PropsFolder);
     const OutlinerSlotToken NativeTok     = AppendEntry(Outliner, "Aero Coupe GT",      "Native Assembly",     "geom:native",         ConstructSlotCategory::GeometryVolume, PropsFolder);
     const OutlinerSlotToken ImportedTok   = AppendEntry(Outliner, "ChassisBracket.step","CAD Import",          "geom:imported",       ConstructSlotCategory::GeometryVolume, PropsFolder);
     const OutlinerSlotToken ProceduralTok = AppendEntry(Outliner, "Alpine Ridge",       "Terrain Generator",   "geom:procedural",     ConstructSlotCategory::GeometryVolume, PropsFolder);
@@ -372,6 +373,10 @@ int main()
         Inspectors.QueryAnalyticPrimitive().QueryPreviewUploads() == 1u &&
         Reg.AccessAnalyticPrimitive(AnalyticTok, *Outliner.FindEntry(AnalyticTok), Bundle.Scene).FormIndex == 4u,
         "Category 1 Analytical Primitive auto-detects Torus & stays at 1 retained upload");
+    AllOk &= VerifyRequirement(RenderInspectorSnapshot(Inspectors, Outliner, Bundle.Scene, DisplaySettings, CubeTok, OutDir / "14-AnalyticCube-Overview.png"), "14-AnalyticCube-Overview.png");
+    AllOk &= VerifyRequirement(
+        Reg.AccessAnalyticPrimitive(CubeTok, *Outliner.FindEntry(CubeTok), Bundle.Scene).FormIndex == 1u,
+        "Category 1 Analytical Primitive identifies Cube");
 
     AllOk &= VerifyRequirement(RenderInspectorSnapshot(Inspectors, Outliner, Bundle.Scene, DisplaySettings, NativeTok, OutDir / "17-NativeGeometry-Overview.png"), "17-NativeGeometry-Overview.png");
     (void)RenderInspectorSnapshot(Inspectors, Outliner, Bundle.Scene, DisplaySettings, NativeTok, OutDir / "17-NativeGeometry-Overview.png");
@@ -404,13 +409,13 @@ int main()
     auto& CamSet = Reg.AccessCameraSettings(CamSetTok);
     CamSet.PbrFillGain = 1.65f;
     CamSet.RendererIndex = 2u; // Switch to Ray Traced
-    CamSet.RayGiSamples  = 12.0f;
+    CamSet.PathTraceTargetSpp = 128.0f;
     Inspectors.QueryCameraSettings().SetActivePage(1u); // Tracer page
     AllOk &= VerifyRequirement(RenderInspectorSnapshot(Inspectors, Outliner, Bundle.Scene, DisplaySettings, CamSetTok, OutDir / "27-CameraSettings-RayTraced.png"), "27-CameraSettings-RayTraced.png");
     Inspectors.QueryCameraSettings().SetActivePage(0u);
     CamSet.RendererIndex = 0u; // Switch back to PBR and verify PBR settings survived untouched
     AllOk &= VerifyRequirement(
-        std::fabs(CamSet.PbrFillGain - 1.65f) < 1e-4f && std::fabs(CamSet.RayGiSamples - 12.0f) < 1e-4f,
+        std::fabs(CamSet.PbrFillGain - 1.65f) < 1e-4f && std::fabs(CamSet.PathTraceTargetSpp - 128.0f) < 1e-4f,
         "Switching Camera Settings renderer preserves per-renderer parameters independently");
 
     // 5. F78 Camera Mount page (Page 2 / 5: On tripod vs Floating diagram + XYZ table)

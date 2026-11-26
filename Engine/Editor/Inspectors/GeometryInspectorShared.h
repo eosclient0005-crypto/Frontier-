@@ -20,14 +20,11 @@
 namespace Frontier::GeometryUi
 {
 
-inline constexpr ColorRgba CardFill   { 26u, 26u, 27u, 255u };
-inline constexpr ColorRgba CardBorder { 255u, 255u, 255u, 20u };
-inline constexpr ColorRgba RowFill    { 17u, 17u, 18u, 255u };
-
 inline void ConstructGeomCard(PixelSpace& Surface, const Rectangle2D& Card) noexcept
 {
-    Surface.FillRectangle(Card, CardFill, InspectorMetrics::SectionRadius);
-    Surface.StrokeRectangle(Card, CardBorder, InspectorMetrics::SectionRadius, 1.0f);
+    const auto& Colors = ControlAppearance::Colors();
+    Surface.FillRectangle(Card, Colors.SectionSurface.ToRgba8(), InspectorMetrics::SectionRadius);
+    Surface.StrokeRectangle(Card, Colors.Stroke.ToRgba8(), InspectorMetrics::SectionRadius, 1.0f);
 }
 
 inline void DrawIsometricCube(
@@ -320,15 +317,15 @@ inline float ConstructGeometryPages(
             const Rectangle2D K0 { WideX, CursorY, HalfW, 102.0f };
             ConstructGeomCard(Surface, K0);
             Surface.FillCircle({ K0.X + 26.0f, K0.Y + 26.0f }, 10.0f, ColorRgba{ 62u, 206u, 118u, 255u });
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K0.X + 44.0f, K0.Y + 20.0f }, 11.4f, InspectorMetrics::MutedInk, "Checks passed");
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K0.X + 20.0f, K0.Y + 52.0f }, 36.0f, InspectorMetrics::HeadingInk, "1");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K0.X + 44.0f, K0.Y + 20.0f }, 11.4f, ControlAppearance::Colors().TextDim.ToRgba8(), "Checks passed");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K0.X + 20.0f, K0.Y + 52.0f }, 36.0f, ControlAppearance::Colors().Text.ToRgba8(), "1");
 
             const Rectangle2D K1 { WideX + HalfW + Gap, CursorY, HalfW, 102.0f };
             ConstructGeomCard(Surface, K1);
             Surface.FillRectangle({ K1.X + 16.0f, K1.Y + 16.0f, 20.0f, 20.0f }, ColorRgba{ 238u, 98u, 94u, 255u }, 6.0f);
             WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Medium, { K1.X + 24.0f, K1.Y + 20.0f }, 11.0f, ColorRgba{ 20u, 20u, 20u, 255u }, "!");
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K1.X + 44.0f, K1.Y + 20.0f }, 11.4f, InspectorMetrics::MutedInk, "Warnings");
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K1.X + 20.0f, K1.Y + 52.0f }, 36.0f, InspectorMetrics::HeadingInk, "0");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K1.X + 44.0f, K1.Y + 20.0f }, 11.4f, ControlAppearance::Colors().TextDim.ToRgba8(), "Warnings");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K1.X + 20.0f, K1.Y + 52.0f }, 36.0f, ControlAppearance::Colors().Text.ToRgba8(), "0");
             CursorY += 102.0f + 12.0f;
         }
 
@@ -338,9 +335,9 @@ inline float ConstructGeometryPages(
             ConstructGeomCard(Surface, Card);
             Surface.FillCircle({ BodyX + 12.0f, Card.Y + 32.0f }, 13.0f, ColorRgba{ 30u, 52u, 42u, 255u });
             Surface.StrokeCircle({ BodyX + 12.0f, Card.Y + 32.0f }, 13.0f, ColorRgba{ 76u, 168u, 118u, 160u }, 1.0f);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + 34.0f, Card.Y + 23.0f }, 16.4f, InspectorMetrics::HeadingInk, "Footprint");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + 34.0f, Card.Y + 23.0f }, 16.4f, ControlAppearance::Colors().Text.ToRgba8(), "Footprint");
             const float WSW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.6f, "World size");
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - WSW, Card.Y + 27.0f }, 10.6f, InspectorMetrics::DimInk, "World size");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - WSW, Card.Y + 27.0f }, 10.6f, ControlAppearance::Colors().TextFaint.ToRgba8(), "World size");
 
             // 1.000 m³
             char WholeB[16]{}, FracB[16]{};
@@ -348,12 +345,12 @@ inline float ConstructGeometryPages(
             const int FracI  = static_cast<int>(std::lround((VolM3 - static_cast<float>(WholeI)) * 1000.0f)) % 1000;
             std::snprintf(WholeB, sizeof(WholeB), "%d", WholeI);
             std::snprintf(FracB,  sizeof(FracB),  ".%03d", std::max(0, FracI));
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 62.0f }, 42.0f, ColorRgba{ 244u, 244u, 244u, 255u }, WholeB);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 62.0f }, 42.0f, ControlAppearance::Colors().Text.ToRgba8(), WholeB);
             const float W1 = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 42.0f, WholeB);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + W1, Card.Y + 62.0f }, 42.0f, ColorRgba{ 120u, 120u, 124u, 255u }, FracB);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + W1, Card.Y + 62.0f }, 42.0f, ControlAppearance::Colors().TextDim.ToRgba8(), FracB);
             const float W2 = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 42.0f, FracB);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + W1 + W2 + 6.0f, Card.Y + 84.0f }, 14.0f, InspectorMetrics::MutedInk, "m\xC2\xB3");
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.8f, InspectorMetrics::DimInk, "Volume");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + W1 + W2 + 6.0f, Card.Y + 84.0f }, 14.0f, ControlAppearance::Colors().TextDim.ToRgba8(), "m\xC2\xB3");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.8f, ControlAppearance::Colors().TextFaint.ToRgba8(), "Volume");
 
             // 3 dimension tiles: WIDTH / HEIGHT / DEPTH
             const float TGap = 8.0f;
@@ -362,16 +359,16 @@ inline float ConstructGeometryPages(
             for (uint32_t I = 0u; I < 3u; ++I)
             {
                 const Rectangle2D T { BodyX + static_cast<float>(I) * (TW + TGap), Card.Y + 136.0f, TW, 58.0f };
-                Surface.FillRectangle(T, ColorRgba{ 32u, 32u, 33u, 255u }, 12.0f);
-                Surface.StrokeRectangle(T, ColorRgba{ 255u, 255u, 255u, 14u }, 12.0f, 1.0f);
-                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { T.X + 10.0f, T.Y + 10.0f }, 8.6f, InspectorMetrics::DimInk, Dims[I].first);
+                Surface.FillRectangle(T, ControlAppearance::Colors().SectionSubtle.ToRgba8(), 12.0f);
+                Surface.StrokeRectangle(T, ControlAppearance::Colors().Stroke.ToRgba8(), 12.0f, 1.0f);
+                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { T.X + 10.0f, T.Y + 10.0f }, 8.6f, ControlAppearance::Colors().TextFaint.ToRgba8(), Dims[I].first);
                 char DBuf[20]{};
                 std::snprintf(DBuf, sizeof(DBuf), "%.2f m", Dims[I].second);
-                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { T.X + 10.0f, T.Y + 30.0f }, 14.0f, InspectorMetrics::HeadingInk, DBuf);
+                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { T.X + 10.0f, T.Y + 30.0f }, 14.0f, ControlAppearance::Colors().Text.ToRgba8(), DBuf);
             }
             char SurfBuf[72]{};
             std::snprintf(SurfBuf, sizeof(SurfBuf), "Surface \xE2\x89\x88 %.2f m\xC2\xB2 \xC2\xB7 bounds include scale.", SurfM2);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 210.0f }, 10.0f, InspectorMetrics::DimInk, SurfBuf);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 210.0f }, 10.0f, ControlAppearance::Colors().TextFaint.ToRgba8(), SurfBuf);
             CursorY = Card.Bottom() + 12.0f;
         }
 
@@ -379,9 +376,9 @@ inline float ConstructGeometryPages(
         {
             const Rectangle2D Card { WideX, CursorY, WideW, 240.0f };
             ConstructGeomCard(Surface, Card);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 16.4f, InspectorMetrics::HeadingInk, "Components");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 16.4f, ControlAppearance::Colors().Text.ToRgba8(), "Components");
             const float SW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.4f, "3 on this object");
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - SW, Card.Y + 27.0f }, 10.4f, InspectorMetrics::DimInk, "3 on this object");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - SW, Card.Y + 27.0f }, 10.4f, ControlAppearance::Colors().TextFaint.ToRgba8(), "3 on this object");
 
             const std::array<std::tuple<const char*, const char*, ColorRgba>, 3u> Rows = {{
                 { "Mass",       "950 kg \xC2\xB7 Plastic",     ColorRgba{ 168u, 174u, 184u, 255u } },
@@ -391,15 +388,15 @@ inline float ConstructGeometryPages(
             for (uint32_t I = 0u; I < 3u; ++I)
             {
                 const Rectangle2D R { BodyX - 6.0f, Card.Y + 58.0f + static_cast<float>(I) * 58.0f, BodyW + 12.0f, 50.0f };
-                Surface.FillRectangle(R, RowFill, 14.0f);
-                Surface.StrokeRectangle(R, ColorRgba{ 255u, 255u, 255u, 14u }, 14.0f, 1.0f);
+                Surface.FillRectangle(R, ControlAppearance::Colors().Field.ToRgba8(), 14.0f);
+                Surface.StrokeRectangle(R, ControlAppearance::Colors().Stroke.ToRgba8(), 14.0f, 1.0f);
                 Surface.FillCircle({ R.X + 24.0f, R.Center().Y }, 9.0f, std::get<2>(Rows[I]).ScaledAlpha(0.25f));
                 Surface.StrokeCircle({ R.X + 24.0f, R.Center().Y }, 7.0f, std::get<2>(Rows[I]), 1.3f);
-                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Medium, { R.X + 46.0f, R.Y + 11.0f }, 12.4f, InspectorMetrics::HeadingInk, std::get<0>(Rows[I]));
-                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { R.X + 46.0f, R.Y + 28.0f }, 10.2f, InspectorMetrics::DimInk, std::get<1>(Rows[I]));
+                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Medium, { R.X + 46.0f, R.Y + 11.0f }, 12.4f, ControlAppearance::Colors().Text.ToRgba8(), std::get<0>(Rows[I]));
+                WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { R.X + 46.0f, R.Y + 28.0f }, 10.2f, ControlAppearance::Colors().TextFaint.ToRgba8(), std::get<1>(Rows[I]));
                 const Point2D Ch { R.Right() - 16.0f, R.Center().Y };
-                Surface.StrokeLine({ Ch.X - 3.0f, Ch.Y - 4.0f }, { Ch.X + 1.5f, Ch.Y }, InspectorMetrics::DimInk, 1.4f);
-                Surface.StrokeLine({ Ch.X + 1.5f, Ch.Y }, { Ch.X - 3.0f, Ch.Y + 4.0f }, InspectorMetrics::DimInk, 1.4f);
+                Surface.StrokeLine({ Ch.X - 3.0f, Ch.Y - 4.0f }, { Ch.X + 1.5f, Ch.Y }, ControlAppearance::Colors().TextFaint.ToRgba8(), 1.4f);
+                Surface.StrokeLine({ Ch.X + 1.5f, Ch.Y }, { Ch.X - 3.0f, Ch.Y + 4.0f }, ControlAppearance::Colors().TextFaint.ToRgba8(), 1.4f);
             }
             CursorY = Card.Bottom() + InspectorMetrics::SectionGap;
         }
@@ -409,9 +406,9 @@ inline float ConstructGeometryPages(
         // TAB 2: COMPONENTS — Component stack (h = 252) + footnote + Collision fit (h = 168)
         const Rectangle2D Card { WideX, CursorY, WideW, 252.0f };
         ConstructGeomCard(Surface, Card);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 16.4f, InspectorMetrics::HeadingInk, "Component stack");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 16.4f, ControlAppearance::Colors().Text.ToRgba8(), "Component stack");
         const float SW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.4f, "3 of 3 on");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - SW, Card.Y + 27.0f }, 10.4f, InspectorMetrics::DimInk, "3 of 3 on");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - SW, Card.Y + 27.0f }, 10.4f, ControlAppearance::Colors().TextFaint.ToRgba8(), "3 of 3 on");
 
         const std::array<std::tuple<const char*, const char*, ColorRgba>, 3u> Rows = {{
             { "Mass",       "950 kg \xC2\xB7 Pla...", ColorRgba{ 168u, 174u, 184u, 255u } },
@@ -421,39 +418,39 @@ inline float ConstructGeometryPages(
         for (uint32_t I = 0u; I < 3u; ++I)
         {
             const Rectangle2D R { BodyX - 6.0f, Card.Y + 58.0f + static_cast<float>(I) * 60.0f, BodyW + 12.0f, 52.0f };
-            Surface.FillRectangle(R, RowFill, 14.0f);
-            Surface.StrokeRectangle(R, ColorRgba{ 255u, 255u, 255u, 14u }, 14.0f, 1.0f);
+            Surface.FillRectangle(R, ControlAppearance::Colors().Field.ToRgba8(), 14.0f);
+            Surface.StrokeRectangle(R, ControlAppearance::Colors().Stroke.ToRgba8(), 14.0f, 1.0f);
             // 6-dot grip handle
             for (int Gy = 0; Gy < 3; ++Gy)
                 for (int Gx = 0; Gx < 2; ++Gx)
-                    Surface.FillCircle({ R.X + 12.0f + Gx * 4.0f, R.Y + 19.0f + Gy * 6.0f }, 1.1f, InspectorMetrics::DimInk);
+                    Surface.FillCircle({ R.X + 12.0f + Gx * 4.0f, R.Y + 19.0f + Gy * 6.0f }, 1.1f, ControlAppearance::Colors().TextFaint.ToRgba8());
             Surface.StrokeCircle({ R.X + 38.0f, R.Center().Y }, 7.0f, std::get<2>(Rows[I]), 1.3f);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Medium, { R.X + 58.0f, R.Y + 11.0f }, 12.2f, InspectorMetrics::HeadingInk, std::get<0>(Rows[I]));
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { R.X + 58.0f, R.Y + 29.0f }, 10.0f, InspectorMetrics::DimInk, std::get<1>(Rows[I]));
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Medium, { R.X + 58.0f, R.Y + 11.0f }, 12.2f, ControlAppearance::Colors().Text.ToRgba8(), std::get<0>(Rows[I]));
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { R.X + 58.0f, R.Y + 29.0f }, 10.0f, ControlAppearance::Colors().TextFaint.ToRgba8(), std::get<1>(Rows[I]));
             // Green active toggle switch
             const Rectangle2D Tog { R.Right() - 108.0f, R.Center().Y - 11.0f, 36.0f, 22.0f };
             Surface.FillRectangle(Tog, ColorRgba{ 58u, 204u, 118u, 255u }, 11.0f);
             Surface.FillCircle({ Tog.Right() - 11.0f, Tog.Center().Y }, 8.5f, ColorRgba{ 246u, 246u, 246u, 255u });
             // Up/Down/Close glyph hints
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { R.Right() - 56.0f, R.Center().Y - 5.0f }, 10.0f, InspectorMetrics::DimInk, "^   v   x");
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { R.Right() - 56.0f, R.Center().Y - 5.0f }, 10.0f, ControlAppearance::Colors().TextFaint.ToRgba8(), "^   v   x");
         }
         CursorY = Card.Bottom() + 10.0f;
         (void)InspectorPrimitives::ConstructWrappedParagraph(
-            Surface, WideX + 4.0f, CursorY, WideW - 8.0f, 10.0f, 14.2f, InspectorMetrics::DimInk,
+            Surface, WideX + 4.0f, CursorY, WideW - 8.0f, 10.0f, 14.2f, ControlAppearance::Colors().TextFaint.ToRgba8(),
             "Values stay on the object, so a removed component comes back with its settings. Order is kept with the scene.");
         CursorY += 44.0f;
 
         const Rectangle2D FitCard { WideX, CursorY, WideW, 168.0f };
         ConstructGeomCard(Surface, FitCard);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, FitCard.Y + 24.0f }, 14.0f, InspectorMetrics::HeadingInk, "Collision fit");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, FitCard.Y + 24.0f }, 14.0f, ControlAppearance::Colors().Text.ToRgba8(), "Collision fit");
         (void)InspectorPrimitives::ConstructWrappedParagraph(
-            Surface, BodyX, FitCard.Y + 64.0f, BodyW, 11.0f, 16.0f, InspectorMetrics::MutedInk,
+            Surface, BodyX, FitCard.Y + 64.0f, BodyW, 11.0f, 16.0f, ControlAppearance::Colors().TextDim.ToRgba8(),
             "Fit box, sphere and capsule proxies, compare how tightly each wraps the object and check the surface is closed.");
         const Rectangle2D FitBtn { BodyX, FitCard.Bottom() - 48.0f, BodyW, 32.0f };
         Surface.FillRectangle(FitBtn, ColorRgba{ 36u, 36u, 38u, 255u }, 16.0f);
         Surface.StrokeRectangle(FitBtn, ColorRgba{ 255u, 255u, 255u, 28u }, 16.0f, 1.0f);
         const float FBW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.4f, "Open Collision Fit");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { FitBtn.Center().X - FBW * 0.5f, FitBtn.Y + 9.5f }, 11.4f, InspectorMetrics::HeadingInk, "Open Collision Fit");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { FitBtn.Center().X - FBW * 0.5f, FitBtn.Y + 9.5f }, 11.4f, ControlAppearance::Colors().Text.ToRgba8(), "Open Collision Fit");
         CursorY = FitCard.Bottom() + InspectorMetrics::SectionGap;
     }
     else if (ActivePage == 2u)
@@ -461,12 +458,12 @@ inline float ConstructGeometryPages(
         // TAB 3: GEOMETRY — Transform (LOCAL SPACE, live sliders + reset buttons) + Shape + Category Controls
         const Rectangle2D TCard { WideX, CursorY, WideW, 536.0f };
         ConstructGeomCard(Surface, TCard);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, TCard.Y + 24.0f }, 16.4f, InspectorMetrics::HeadingInk, "Transform");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, TCard.Y + 24.0f }, 16.4f, ControlAppearance::Colors().Text.ToRgba8(), "Transform");
         const float LW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 9.6f, "LIVE SCENE SYNC");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - LW, TCard.Y + 28.0f }, 9.6f, InspectorMetrics::DimInk, "LIVE SCENE SYNC");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - LW, TCard.Y + 28.0f }, 9.6f, ControlAppearance::Colors().TextFaint.ToRgba8(), "LIVE SCENE SYNC");
 
         const float HeadY = TCard.Y + 62.0f;
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, HeadY }, 10.4f, InspectorMetrics::DimInk, "Component");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, HeadY }, 10.4f, ControlAppearance::Colors().TextFaint.ToRgba8(), "Component");
         const float Col0X = BodyX + 76.0f, ColGap = 6.0f;
         const float ColW = std::floor((BodyW - 76.0f - ColGap * 2.0f) / 3.0f);
         const std::array<std::pair<const char*, ColorRgba>, 3u> Axes = {{
@@ -483,8 +480,8 @@ inline float ConstructGeometryPages(
         for (uint32_t R = 0u; R < 3u; ++R)
         {
             const float RY = HeadY + 24.0f + static_cast<float>(R) * 40.0f;
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RY + 2.0f }, 11.4f, InspectorMetrics::HeadingInk, std::get<0>(Rows[R]));
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RY + 16.0f }, 9.2f, InspectorMetrics::DimInk, std::get<1>(Rows[R]));
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RY + 2.0f }, 11.4f, ControlAppearance::Colors().Text.ToRgba8(), std::get<0>(Rows[R]));
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RY + 16.0f }, 9.2f, ControlAppearance::Colors().TextFaint.ToRgba8(), std::get<1>(Rows[R]));
             const std::array<float, 3u> Vals = {{ std::get<2>(Rows[R]), std::get<3>(Rows[R]), std::get<4>(Rows[R]) }};
             for (uint32_t C = 0u; C < 3u; ++C)
             {
@@ -493,7 +490,7 @@ inline float ConstructGeometryPages(
                 char Num[24]{};
                 std::snprintf(Num, sizeof(Num), "%.4g", Vals[C]);
                 const float NW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 12.2f, Num);
-                WorkspaceAppearance::ConstructTruncatedText(Surface, FontWeightClass::Regular, { Box.X + std::max(4.0f, (Box.Width - NW) * 0.5f), Box.Y + 8.0f }, Box.Width - 8.0f, 12.2f, InspectorMetrics::HeadingInk, Num);
+                WorkspaceAppearance::ConstructTruncatedText(Surface, FontWeightClass::Regular, { Box.X + std::max(4.0f, (Box.Width - NW) * 0.5f), Box.Y + 8.0f }, Box.Width - 8.0f, 12.2f, ControlAppearance::Colors().Text.ToRgba8(), Num);
             }
         }
         bool TransformMutated = false;
@@ -520,7 +517,7 @@ inline float ConstructGeometryPages(
             Surface.FillRectangle(B, Hov ? ColorRgba{ 46u, 48u, 52u, 255u } : ColorRgba{ 32u, 32u, 34u, 255u }, 14.0f);
             Surface.StrokeRectangle(B, ColorRgba{ 255u, 255u, 255u, static_cast<uint8_t>(Hov ? 48u : 20u) }, 14.0f, 1.0f);
             const float TW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 9.8f, Rsts[I]);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { B.Center().X - TW * 0.5f, B.Y + 8.5f }, 9.8f, InspectorMetrics::HeadingInk, Rsts[I]);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { B.Center().X - TW * 0.5f, B.Y + 8.5f }, 9.8f, ControlAppearance::Colors().Text.ToRgba8(), Rsts[I]);
             if (Hov && Input.PrimaryPointer.Pressed)
             {
                 if (I == 0u)      { Entry.PositionX = 0.0f; Entry.PositionY = 0.0f; Entry.PositionZ = 0.0f; }
@@ -550,13 +547,13 @@ inline float ConstructGeometryPages(
         // Shape summary card
         const Rectangle2D SCard { WideX, CursorY, WideW, 240.0f };
         ConstructGeomCard(Surface, SCard);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, SCard.Y + 24.0f }, 14.0f, InspectorMetrics::HeadingInk, Desc.DomainLabel ? Desc.DomainLabel : "Shape");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, SCard.Y + 24.0f }, 14.0f, ControlAppearance::Colors().Text.ToRgba8(), Desc.DomainLabel ? Desc.DomainLabel : "Shape");
         char SzBuf[16]{};
         std::snprintf(SzBuf, sizeof(SzBuf), "%.2f", Wx);
         (void)InspectorPrimitives::ConstructMetricReadout(Surface, BodyX, SCard.Y + 62.0f, SzBuf, "m \xC2\xB7 Size X", nullptr, 34.0f);
         char SubB[96]{};
         std::snprintf(SubB, sizeof(SubB), "%s \xC2\xB7 %.2f \xC3\x97 %.2f \xC3\x97 %.2f m · %u tris", Desc.ShapeName, Wx, Hy, Dz, LiveTris);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, SCard.Y + 114.0f }, 10.6f, InspectorMetrics::MutedInk, SubB);
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, SCard.Y + 114.0f }, 10.6f, ControlAppearance::Colors().TextDim.ToRgba8(), SubB);
         DrawIsometricCube(Surface, { SCard.Center().X - 10.0f, SCard.Y + 196.0f }, 44.0f,
             ColorRgba{ 36u, 36u, 38u, 255u }, ColorRgba{ 30u, 30u, 32u, 255u }, ColorRgba{ 26u, 26u, 28u, 255u }, ColorRgba{ 138u, 140u, 144u, 210u });
         CursorY = SCard.Bottom() + InspectorMetrics::SectionGap;
@@ -566,33 +563,33 @@ inline float ConstructGeometryPages(
         // TAB 4: MATERIAL — Material channels (h = 646)
         const Rectangle2D Card { WideX, CursorY, WideW, 646.0f };
         ConstructGeomCard(Surface, Card);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 9.2f, InspectorMetrics::DimInk, "MATERIAL / SLOT 0");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 9.2f, ControlAppearance::Colors().TextFaint.ToRgba8(), "MATERIAL / SLOT 0");
         Surface.StrokeCircle({ BodyX + BodyW - 14.0f, Card.Y + 34.0f }, 14.0f, ColorRgba{ 255u, 255u, 255u, 28u }, 1.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 44.0f }, 21.0f, InspectorMetrics::HeadingInk, "Material channels");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 44.0f }, 21.0f, ControlAppearance::Colors().Text.ToRgba8(), "Material channels");
         std::string BoundStr = "Bound to " + Entry.Title + " \xC2\xB7 #cube";
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 78.0f }, 10.8f, InspectorMetrics::MutedInk, BoundStr);
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 78.0f }, 10.8f, ControlAppearance::Colors().TextDim.ToRgba8(), BoundStr);
 
         // Nested Material slots container
         const Rectangle2D Slots { BodyX, Card.Y + 102.0f, BodyW, 214.0f };
         Surface.FillRectangle(Slots, ColorRgba{ 22u, 22u, 23u, 255u }, 16.0f);
         Surface.StrokeRectangle(Slots, ColorRgba{ 255u, 255u, 255u, 16u }, 16.0f, 1.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Slots.X + 14.0f, Slots.Y + 14.0f }, 12.2f, InspectorMetrics::HeadingInk, "Material slots");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Slots.Right() - 32.0f, Slots.Y + 15.0f }, 10.0f, InspectorMetrics::DimInk, "1 / 8");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Slots.X + 14.0f, Slots.Y + 14.0f }, 12.2f, ControlAppearance::Colors().Text.ToRgba8(), "Material slots");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Slots.Right() - 32.0f, Slots.Y + 15.0f }, 10.0f, ControlAppearance::Colors().TextFaint.ToRgba8(), "1 / 8");
 
         const Rectangle2D S0 { Slots.X + 12.0f, Slots.Y + 42.0f, Slots.Width - 24.0f, 38.0f };
         Surface.FillRectangle(S0, ColorRgba{ 30u, 28u, 27u, 255u }, 12.0f);
         Surface.StrokeRectangle(S0, ColorRgba{ 165u, 154u, 142u, 140u }, 12.0f, 1.0f);
         Surface.FillCircle({ S0.X + 19.0f, S0.Center().Y }, 10.0f, ColorRgba{ 188u, 166u, 152u, 255u });
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { S0.X + 36.0f, S0.Y + 6.0f }, 8.2f, InspectorMetrics::DimInk, "SLOT 0");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { S0.X + 36.0f, S0.Y + 18.0f }, 11.4f, InspectorMetrics::HeadingInk, "Surface material");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { S0.Right() - 18.0f, S0.Y + 13.0f }, 9.6f, InspectorMetrics::DimInk, "all");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { S0.X + 36.0f, S0.Y + 6.0f }, 8.2f, ControlAppearance::Colors().TextFaint.ToRgba8(), "SLOT 0");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { S0.X + 36.0f, S0.Y + 18.0f }, 11.4f, ControlAppearance::Colors().Text.ToRgba8(), "Surface material");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { S0.Right() - 18.0f, S0.Y + 13.0f }, 9.6f, ControlAppearance::Colors().TextFaint.ToRgba8(), "all");
 
         const Rectangle2D AddS { Slots.X + 12.0f, S0.Bottom() + 8.0f, Slots.Width - 24.0f, 34.0f };
         Surface.StrokeRectangle(AddS, ColorRgba{ 255u, 255u, 255u, 28u }, 12.0f, 1.0f);
         const float ASW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.0f, "+ Add slot");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { AddS.Center().X - ASW * 0.5f, AddS.Y + 10.5f }, 11.0f, InspectorMetrics::MutedInk, "+ Add slot");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { AddS.Center().X - ASW * 0.5f, AddS.Y + 10.5f }, 11.0f, ControlAppearance::Colors().TextDim.ToRgba8(), "+ Add slot");
 
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Slots.X + 12.0f, AddS.Bottom() + 12.0f }, 9.4f, InspectorMetrics::DimInk, "Slot 0 draws every part not given to another slot");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Slots.X + 12.0f, AddS.Bottom() + 12.0f }, 9.4f, ControlAppearance::Colors().TextFaint.ToRgba8(), "Slot 0 draws every part not given to another slot");
         const std::array<const char*, 6u> Faces = {{ "Right", "Left", "Top", "Bottom", "Front", "Back" }};
         float FX = Slots.X + 12.0f, FY = AddS.Bottom() + 28.0f;
         for (uint32_t I = 0u; I < 6u; ++I)
@@ -602,7 +599,7 @@ inline float ConstructGeometryPages(
             const Rectangle2D FP { FX, FY, FW, 24.0f };
             Surface.FillRectangle(FP, ColorRgba{ 30u, 30u, 32u, 255u }, 10.0f);
             Surface.StrokeRectangle(FP, ColorRgba{ 255u, 255u, 255u, 20u }, 10.0f, 1.0f);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { FP.X + 9.0f, FP.Y + 6.0f }, 9.6f, InspectorMetrics::MutedInk, Faces[I]);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { FP.X + 9.0f, FP.Y + 6.0f }, 9.6f, ControlAppearance::Colors().TextDim.ToRgba8(), Faces[I]);
             FX += FW + 5.0f;
         }
 
@@ -628,8 +625,8 @@ inline float ConstructGeometryPages(
             const Rectangle2D K { X, KpiY, KpiW, 74.0f };
             Surface.FillRectangle(K, ColorRgba{ 22u, 22u, 23u, 255u }, 16.0f);
             Surface.FillCircle({ K.X + 16.0f, K.Y + 18.0f }, 4.0f, Dot);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K.X + 26.0f, K.Y + 13.0f }, 9.6f, InspectorMetrics::MutedInk, Lbl);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K.X + 14.0f, K.Y + 38.0f }, 26.0f, InspectorMetrics::HeadingInk, Val);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K.X + 26.0f, K.Y + 13.0f }, 9.6f, ControlAppearance::Colors().TextDim.ToRgba8(), Lbl);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { K.X + 14.0f, K.Y + 38.0f }, 26.0f, ControlAppearance::Colors().Text.ToRgba8(), Val);
         };
         char PartBuf[16]{};
         std::snprintf(PartBuf, sizeof(PartBuf), "%u", std::max(1u, Desc.SubPartCount));
@@ -646,9 +643,9 @@ inline float ConstructGeometryPages(
 
         const Rectangle2D Card { WideX, CursorY, WideW, 546.0f };
         ConstructGeomCard(Surface, Card);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 13.2f, InspectorMetrics::HeadingInk, "UV preview");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 13.2f, ControlAppearance::Colors().Text.ToRgba8(), "UV preview");
         (void)InspectorPrimitives::ConstructMetricReadout(Surface, BodyX, Card.Y + 62.0f, "64.1", "% of 1001 used", nullptr, 34.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.6f, InspectorMetrics::MutedInk, "6 islands \xC2\xB7 12 seam edges \xC2\xB7 1 UDIM tile in use");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.6f, ControlAppearance::Colors().TextDim.ToRgba8(), "6 islands \xC2\xB7 12 seam edges \xC2\xB7 1 UDIM tile in use");
 
         const Rectangle2D Well { BodyX, Card.Y + 138.0f, BodyW, 180.0f };
         SharedUvSurface.Present(Surface, Well, 12.0f);
@@ -666,15 +663,15 @@ inline float ConstructGeometryPages(
             const Rectangle2D U { BodyX + static_cast<float>(I) * (UW + 6.0f), UY, UW, 46.0f };
             Surface.FillRectangle(U, (I == 0u) ? ColorRgba{ 34u, 34u, 36u, 255u } : ColorRgba{ 22u, 22u, 23u, 255u }, 10.0f);
             Surface.StrokeRectangle(U, (I == 0u) ? ColorRgba{ 168u, 168u, 174u, 130u } : ColorRgba{ 255u, 255u, 255u, 16u }, 10.0f, 1.0f);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { U.X + 8.0f, U.Y + 8.0f }, 10.8f, (I == 0u) ? InspectorMetrics::HeadingInk : InspectorMetrics::DimInk, Udims[I].first);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { U.X + 8.0f, U.Y + 26.0f }, 8.6f, InspectorMetrics::DimInk, Udims[I].second);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { U.X + 8.0f, U.Y + 8.0f }, 10.8f, (I == 0u) ? ControlAppearance::Colors().Text.ToRgba8() : ControlAppearance::Colors().TextFaint.ToRgba8(), Udims[I].first);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { U.X + 8.0f, U.Y + 26.0f }, 8.6f, ControlAppearance::Colors().TextFaint.ToRgba8(), Udims[I].second);
         }
 
         const float RowY = UY + 60.0f;
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RowY }, 11.2f, InspectorMetrics::MutedInk, "Texel scale");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - 64.0f, RowY }, 11.2f, InspectorMetrics::HeadingInk, "0.327 UV/m");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RowY + 26.0f }, 11.2f, InspectorMetrics::MutedInk, "Unwrap angle");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - 22.0f, RowY + 26.0f }, 11.2f, InspectorMetrics::HeadingInk, "60\xC2\xB0");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RowY }, 11.2f, ControlAppearance::Colors().TextDim.ToRgba8(), "Texel scale");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - 64.0f, RowY }, 11.2f, ControlAppearance::Colors().Text.ToRgba8(), "0.327 UV/m");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RowY + 26.0f }, 11.2f, ControlAppearance::Colors().TextDim.ToRgba8(), "Unwrap angle");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - 22.0f, RowY + 26.0f }, 11.2f, ControlAppearance::Colors().Text.ToRgba8(), "60\xC2\xB0");
 
         const Rectangle2D Btn1 { BodyX, RowY + 54.0f, BodyW, 32.0f };
         Surface.FillRectangle(Btn1, ColorRgba{ 224u, 224u, 224u, 255u }, 16.0f);
@@ -685,7 +682,7 @@ inline float ConstructGeometryPages(
         Surface.FillRectangle(Btn2, ColorRgba{ 26u, 26u, 28u, 255u }, 16.0f);
         Surface.StrokeRectangle(Btn2, ColorRgba{ 255u, 255u, 255u, 24u }, 16.0f, 1.0f);
         const float B2W = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.4f, "Edit in UV workspace");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Btn2.Center().X - B2W * 0.5f, Btn2.Y + 9.5f }, 11.4f, InspectorMetrics::HeadingInk, "Edit in UV workspace");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Btn2.Center().X - B2W * 0.5f, Btn2.Y + 9.5f }, 11.4f, ControlAppearance::Colors().Text.ToRgba8(), "Edit in UV workspace");
         CursorY = Card.Bottom() + InspectorMetrics::SectionGap;
     }
     else if (ActivePage == 5u)
@@ -696,16 +693,16 @@ inline float ConstructGeometryPages(
 
         const Rectangle2D FCard { WideX, CursorY, WideW, 142.0f };
         ConstructGeomCard(Surface, FCard);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, FCard.Y + 24.0f }, 16.4f, InspectorMetrics::HeadingInk, "Fracture");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, FCard.Y + 48.0f }, 9.2f, InspectorMetrics::DimInk, "PER-OBJECT GEOMETRY");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, FCard.Y + 24.0f }, 16.4f, ControlAppearance::Colors().Text.ToRgba8(), "Fracture");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, FCard.Y + 48.0f }, 9.2f, ControlAppearance::Colors().TextFaint.ToRgba8(), "PER-OBJECT GEOMETRY");
         (void)InspectorPrimitives::ConstructToggleFieldRow(Surface, BodyX, FCard.Y + 86.0f, BodyW, "Enable fracture", FractureOn, Input, OutMutated);
         CursorY = FCard.Bottom() + 14.0f;
 
         const Rectangle2D PCard { WideX, CursorY, WideW, 454.0f };
         ConstructGeomCard(Surface, PCard);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, PCard.Y + 24.0f }, 13.0f, InspectorMetrics::HeadingInk, "Fracture preview");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, PCard.Y + 66.0f }, 36.0f, ColorRgba{ 244u, 244u, 244u, 255u }, FractureOn ? "On" : "Off");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, PCard.Y + 116.0f }, 10.6f, InspectorMetrics::MutedInk, "Fracture is off for this object. The preview shows it whole.");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, PCard.Y + 24.0f }, 13.0f, ControlAppearance::Colors().Text.ToRgba8(), "Fracture preview");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, PCard.Y + 66.0f }, 36.0f, ControlAppearance::Colors().Text.ToRgba8(), FractureOn ? "On" : "Off");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, PCard.Y + 116.0f }, 10.6f, ControlAppearance::Colors().TextDim.ToRgba8(), "Fracture is off for this object. The preview shows it whole.");
 
         const Rectangle2D Stage { BodyX, PCard.Y + 144.0f, BodyW, 204.0f };
         Surface.FillRectangle(Stage, ColorRgba{ 16u, 16u, 17u, 255u }, 14.0f);
@@ -725,14 +722,14 @@ inline float ConstructGeometryPages(
 
         const Rectangle2D Card { WideX, CursorY, WideW, 598.0f };
         ConstructGeomCard(Surface, Card);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 13.0f, InspectorMetrics::HeadingInk, "SDF preview");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 13.0f, ControlAppearance::Colors().Text.ToRgba8(), "SDF preview");
         (void)InspectorPrimitives::ConstructMetricReadout(Surface, BodyX, Card.Y + 62.0f, "448", "of 512 bricks", nullptr, 34.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.6f, InspectorMetrics::MutedInk, "64\xC2\xB3 voxels \xC2\xB7 13% of bricks pruned");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.6f, ControlAppearance::Colors().TextDim.ToRgba8(), "64\xC2\xB3 voxels \xC2\xB7 13% of bricks pruned");
 
         const Rectangle2D Well { BodyX, Card.Y + 142.0f, BodyW, 212.0f };
         Surface.FillRectangle(Well, ColorRgba{ 16u, 16u, 17u, 255u }, 14.0f);
         SharedSdfSurface.Present(Surface, { Well.X + 26.0f, Well.Y + 6.0f, Well.Width - 52.0f, Well.Height - 12.0f }, 4.0f);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Well.X + 10.0f, Well.Bottom() - 16.0f }, 9.2f, InspectorMetrics::MutedInk, "centre slice \xC2\xB7 XY");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { Well.X + 10.0f, Well.Bottom() - 16.0f }, 9.2f, ControlAppearance::Colors().TextDim.ToRgba8(), "centre slice \xC2\xB7 XY");
 
         float SY = Well.Bottom() + 18.0f;
         SY = InspectorPrimitives::ConstructScalarFieldRow(Surface, BodyX, SY, BodyW, 8802u, "Slice depth", "", "%.0f", 0.0f, 100.0f, SliceDepth, ActiveDragId, Input, OutMutated);
@@ -748,12 +745,12 @@ inline float ConstructGeometryPages(
         for (uint32_t I = 0u; I < 4u; ++I)
         {
             const float RY = SY + 6.0f + static_cast<float>(I) * 26.0f;
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RY }, 11.0f, InspectorMetrics::MutedInk, Rows[I].first);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, RY }, 11.0f, ControlAppearance::Colors().TextDim.ToRgba8(), Rows[I].first);
             const float VW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.0f, Rows[I].second);
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - VW, RY }, 11.0f, InspectorMetrics::HeadingInk, Rows[I].second);
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - VW, RY }, 11.0f, ControlAppearance::Colors().Text.ToRgba8(), Rows[I].second);
         }
-        Surface.FillCircle({ BodyX + 4.0f, SY + 122.0f }, 4.0f, LiveHasSdf ? ColorRgba{ 76u, 206u, 128u, 255u } : InspectorMetrics::DimInk);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + 16.0f, SY + 116.0f }, 11.0f, InspectorMetrics::MutedInk, LiveHasSdf ? "Local SDF resident on GPU." : "Analytic / clipmap fallback.");
+        Surface.FillCircle({ BodyX + 4.0f, SY + 122.0f }, 4.0f, LiveHasSdf ? ColorRgba{ 76u, 206u, 128u, 255u } : ControlAppearance::Colors().TextFaint.ToRgba8());
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + 16.0f, SY + 116.0f }, 11.0f, ControlAppearance::Colors().TextDim.ToRgba8(), LiveHasSdf ? "Local SDF resident on GPU." : "Analytic / clipmap fallback.");
         CursorY = Card.Bottom() + InspectorMetrics::SectionGap;
     }
     else
@@ -762,13 +759,13 @@ inline float ConstructGeometryPages(
         static float PreviewLod = 0.0f;
         const Rectangle2D Card { WideX, CursorY, WideW, 614.0f };
         ConstructGeomCard(Surface, Card);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 13.0f, InspectorMetrics::HeadingInk, "LOD preview");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 24.0f }, 13.0f, ControlAppearance::Colors().Text.ToRgba8(), "LOD preview");
         char LevB[16]{};
         std::snprintf(LevB, sizeof(LevB), "%u", LiveLods);
         (void)InspectorPrimitives::ConstructMetricReadout(Surface, BodyX, Card.Y + 62.0f, LevB, "levels", nullptr, 34.0f);
         char LodSub[80]{};
         std::snprintf(LodSub, sizeof(LodSub), "%u clusters \xC2\xB7 %u source triangles", LiveClusters, LiveTris);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.6f, InspectorMetrics::MutedInk, LodSub);
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, Card.Y + 114.0f }, 10.6f, ControlAppearance::Colors().TextDim.ToRgba8(), LodSub);
 
         // 6-level coloured bar chart
         const Rectangle2D BarWell { BodyX, Card.Y + 142.0f, BodyW, 130.0f };
@@ -792,9 +789,9 @@ inline float ConstructGeometryPages(
             Surface.FillRectangle(BR, std::get<3>(Bars[I]), 5.0f);
             if (I == 0u) Surface.StrokeRectangle(BR, ColorRgba{ 238u, 244u, 255u, 220u }, 5.0f, 1.2f);
             const float NW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 8.2f, std::get<1>(Bars[I]));
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BR.Center().X - NW * 0.5f, BY - 12.0f }, 8.2f, InspectorMetrics::MutedInk, std::get<1>(Bars[I]));
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BR.Center().X - NW * 0.5f, BY - 12.0f }, 8.2f, ControlAppearance::Colors().TextDim.ToRgba8(), std::get<1>(Bars[I]));
             const float LW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 8.6f, std::get<0>(Bars[I]));
-            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BR.Center().X - LW * 0.5f, BarWell.Bottom() - 15.0f }, 8.6f, InspectorMetrics::DimInk, std::get<0>(Bars[I]));
+            WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BR.Center().X - LW * 0.5f, BarWell.Bottom() - 15.0f }, 8.6f, ControlAppearance::Colors().TextFaint.ToRgba8(), std::get<0>(Bars[I]));
         }
 
         // Cluster-coloured isometric cube stage
@@ -802,13 +799,13 @@ inline float ConstructGeometryPages(
         Surface.FillRectangle(CubeWell, ColorRgba{ 16u, 16u, 17u, 255u }, 14.0f);
         DrawIsometricCube(Surface, { CubeWell.Center().X, CubeWell.Center().Y - 6.0f }, 68.0f,
             ColorRgba{ 138u, 146u, 98u, 255u }, ColorRgba{ 72u, 134u, 108u, 255u }, ColorRgba{ 136u, 82u, 134u, 255u }, ColorRgba{ 30u, 32u, 38u, 255u });
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { CubeWell.X + 10.0f, CubeWell.Bottom() - 16.0f }, 9.2f, InspectorMetrics::MutedInk, "L0 \xC2\xB7 3,072 triangles \xC2\xB7 24 clusters");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { CubeWell.X + 10.0f, CubeWell.Bottom() - 16.0f }, 9.2f, ControlAppearance::Colors().TextDim.ToRgba8(), "L0 \xC2\xB7 3,072 triangles \xC2\xB7 24 clusters");
 
         float LY = CubeWell.Bottom() + 16.0f;
         LY = InspectorPrimitives::ConstructScalarFieldRow(Surface, BodyX, LY, BodyW, 8803u, "Preview level", "of 5", "%.0f", 0.0f, 5.0f, PreviewLod, ActiveDragId, Input, OutMutated);
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, LY + 6.0f }, 11.0f, InspectorMetrics::MutedInk, "Cluster size");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX, LY + 6.0f }, 11.0f, ControlAppearance::Colors().TextDim.ToRgba8(), "Cluster size");
         const float CSW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 11.0f, "128 triangles \xC2\xB7 4 per group");
-        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - CSW, LY + 6.0f }, 11.0f, InspectorMetrics::HeadingInk, "128 triangles \xC2\xB7 4 per group");
+        WorkspaceAppearance::ConstructWeightedText(Surface, FontWeightClass::Regular, { BodyX + BodyW - CSW, LY + 6.0f }, 11.0f, ControlAppearance::Colors().Text.ToRgba8(), "128 triangles \xC2\xB7 4 per group");
         CursorY = Card.Bottom() + InspectorMetrics::SectionGap;
     }
 

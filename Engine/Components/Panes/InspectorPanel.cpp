@@ -8,6 +8,7 @@
 //------------------------------------------------------------------------------------------------------------------------
 
 #include "Engine/Components/Panes/InspectorPanel.h"
+#include "Engine/Components/Controls/ControlAppearance.h"
 #include "Engine/Components/Controls/DropdownSelector.h"
 #include "Engine/Components/Controls/InspectorSectionPrimitives.h"
 #include "Engine/Components/Controls/ScalarSlider.h"
@@ -1874,6 +1875,14 @@ void InspectorPanel::PresentInImGuiPane(double Δt, float ScaleFactor)
         uint64_t OutSig = RetainedCanvasCache::MixBounds(0x8831C0DE71A55E11ull, ScreenBounds, SafeScale);
         OutSig = RetainedCanvasCache::MixHash(OutSig, PackRgba(WorkspaceSurfaceColors::SectionSurface));
         OutSig = RetainedCanvasCache::MixHash(OutSig, PackRgba(WorkspaceSurfaceColors::PrimaryInk));
+        // Geometry cards use the active control palette, including animated theme transitions.
+        // Invalidate retained vertices whenever any of those colors changes.
+        const auto& Colors = ControlAppearance::Colors();
+        for (const ColorQuad Color : { Colors.SectionSurface, Colors.SectionSubtle, Colors.Stroke,
+                                      Colors.Field, Colors.Text, Colors.TextDim, Colors.TextFaint })
+        {
+            OutSig = RetainedCanvasCache::MixHash(OutSig, PackRgba(Color.ToRgba8()));
+        }
         OutSig = RetainedCanvasCache::MixHash(OutSig, ExternalRevision);
         if (OverrideSignatureCallback)
         {
