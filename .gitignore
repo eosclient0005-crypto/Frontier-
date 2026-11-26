@@ -1,0 +1,12 @@
+.cache/
+**/node_modules/
+ExternalPackages/
+_ClaudeScratch/
+Build/
+build/
+build-editor/
+Binaries/
+out/
+*.log
+imgui.ini
+Projects/*/Saved/
