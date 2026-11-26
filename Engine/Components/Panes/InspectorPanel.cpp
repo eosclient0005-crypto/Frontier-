@@ -1875,11 +1875,12 @@ void InspectorPanel::PresentInImGuiPane(double Δt, float ScaleFactor)
         uint64_t OutSig = RetainedCanvasCache::MixBounds(0x8831C0DE71A55E11ull, ScreenBounds, SafeScale);
         OutSig = RetainedCanvasCache::MixHash(OutSig, PackRgba(WorkspaceSurfaceColors::SectionSurface));
         OutSig = RetainedCanvasCache::MixHash(OutSig, PackRgba(WorkspaceSurfaceColors::PrimaryInk));
-        // Geometry cards use the active control palette, including animated theme transitions.
+        // Geometry cards and the page strip use the active control palette, including theme transitions.
         // Invalidate retained vertices whenever any of those colors changes.
         const auto& Colors = ControlAppearance::Colors();
         for (const ColorQuad Color : { Colors.SectionSurface, Colors.SectionSubtle, Colors.Stroke,
-                                      Colors.Field, Colors.Text, Colors.TextDim, Colors.TextFaint })
+                                      Colors.Field, Colors.Text, Colors.TextDim, Colors.TextFaint,
+                                      Colors.Selected, Colors.Raised, Colors.Primary, Colors.PrimaryInk })
         {
             OutSig = RetainedCanvasCache::MixHash(OutSig, PackRgba(Color.ToRgba8()));
         }

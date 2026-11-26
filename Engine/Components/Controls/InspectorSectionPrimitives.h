@@ -256,7 +256,7 @@ void ConstructSwitchSymbol(
     const char* Title,
     const char* Subtitle) noexcept;
 
-// Exact 1:1 port of PageCarousel.jsx + InspectorTabs.jsx: < | (1) Overview (2) ... | > | 1 / N
+// Themed inspector page strip: < | (1) Overview (2) ... | > | 1 / N
 [[nodiscard]] float ConstructPageStrip(
     PixelSpace&                  Surface,
     float                        LeftX,

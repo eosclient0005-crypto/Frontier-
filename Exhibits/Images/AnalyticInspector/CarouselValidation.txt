@@ -1,0 +1,10 @@
+Native carousel and geometry theme validation
+Command: cmake --build .cache/native-build --target Frontier GeometryInspectorThemeValidation StandaloneInspectorsValidation -j 4
+Result: build passed (Frontier, focused validation and standalone validation).
+
+Command: .cache/native-build/GeometryInspectorThemeValidation
+Geometry card theme and page strip validation passed
+
+Checked: OLED, Dim and Light card/strip fills; first/last arrow wrapping; direct pill selection; disabled pointer; empty, single and 20-page lists.
+
+StandaloneInspectorsValidation: exit 1; 11 preview-upload expectations failed (see StandaloneInspectorsValidation.txt). Cube capture and cube/torus classification checks passed.

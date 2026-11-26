@@ -572,6 +572,8 @@ float ConstructPageStrip(
     InOutActivePage = std::min(InOutActivePage, PageCount - 1u);
 
     const Point2D Cursor { Input.PrimaryPointer.X, Input.PrimaryPointer.Y };
+    const auto& Colors = ControlAppearance::Colors();
+    const ColorRgba RailFill = Colors.Field.ToRgba8();
     const float   StripH = InspectorMetrics::PageStripHeight; // 34px
     RegisterInteractiveRect({ LeftX, TopY, InnerWidth, StripH });
     const float   StepW  = 28.0f;
@@ -581,15 +583,15 @@ float ConstructPageStrip(
 
     // 1. Left "<" circular pill button
     const Rectangle2D PrevBtn { LeftX, StepY, StepW, StepH };
-    const bool        PrevDisabled = (InOutActivePage == 0u);
-    const bool        PrevHov      = !PrevDisabled && PrevBtn.Contains(Cursor);
+    const bool        PrevDisabled = (PageCount < 2u);
+    const bool        PrevHov      = !PrevDisabled && Input.PrimaryPointer.Enabled && PrevBtn.Contains(Cursor);
     Surface.FillRectangle(
         PrevBtn,
-        PrevHov ? ColorRgba{ 41u, 41u, 45u, 255u } : InspectorMetrics::PageStepFill.ScaledAlpha(PrevDisabled ? 0.45f : 1.0f),
+        PrevHov ? Colors.Selected.ToRgba8() : Colors.SectionSurface.ToRgba8().ScaledAlpha(PrevDisabled ? 0.45f : 1.0f),
         StepR);
-    Surface.StrokeRectangle(PrevBtn, ColorRgba{ 255u, 255u, 255u, 18u }, StepR, 1.0f);
+    Surface.StrokeRectangle(PrevBtn, Colors.Stroke.ToRgba8(), StepR, 1.0f);
     {
-        const ColorRgba ChevInk = PrevDisabled ? ColorRgba{ 95u, 98u, 104u, 255u } : ColorRgba{ 201u, 204u, 209u, 255u };
+        const ColorRgba ChevInk = (PrevDisabled ? Colors.TextFaint : Colors.TextDim).ToRgba8();
         const Point2D   C       = PrevBtn.Center();
         const std::array<Point2D, 3u> Chev = {{
             { C.X + 2.2f, C.Y - 4.0f },
@@ -600,28 +602,26 @@ float ConstructPageStrip(
     }
     if (PrevHov && Input.PrimaryPointer.Pressed)
     {
-        --InOutActivePage;
+        InOutActivePage = (InOutActivePage == 0u) ? PageCount - 1u : InOutActivePage - 1u;
         OutPageSwitched = true;
     }
 
     // 2. Right counter ("1 / N") & ">" circular pill button
     char CounterBuf[24]{};
-    std::snprintf(CounterBuf, sizeof(CounterBuf), "%u / %u", InOutActivePage + 1u, PageCount);
+    std::snprintf(CounterBuf, sizeof(CounterBuf), "%u / %u", PageCount, PageCount);
     const float CounterW  = std::max(28.0f, WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.5f, CounterBuf));
     const float RightEdge = LeftX + InnerWidth;
-    WorkspaceAppearance::ConstructWeightedText(
-        Surface, FontWeightClass::Regular, { RightEdge - CounterW, TopY + 10.5f }, 10.5f, ColorRgba{ 138u, 142u, 149u, 255u }, CounterBuf);
 
     const Rectangle2D NextBtn { RightEdge - CounterW - 6.0f - StepW, StepY, StepW, StepH };
-    const bool        NextDisabled = (InOutActivePage + 1u >= PageCount);
-    const bool        NextHov      = !NextDisabled && NextBtn.Contains(Cursor);
+    const bool        NextDisabled = (PageCount < 2u);
+    const bool        NextHov      = !NextDisabled && Input.PrimaryPointer.Enabled && NextBtn.Contains(Cursor);
     Surface.FillRectangle(
         NextBtn,
-        NextHov ? ColorRgba{ 41u, 41u, 45u, 255u } : InspectorMetrics::PageStepFill.ScaledAlpha(NextDisabled ? 0.45f : 1.0f),
+        NextHov ? Colors.Selected.ToRgba8() : Colors.SectionSurface.ToRgba8().ScaledAlpha(NextDisabled ? 0.45f : 1.0f),
         StepR);
-    Surface.StrokeRectangle(NextBtn, ColorRgba{ 255u, 255u, 255u, 18u }, StepR, 1.0f);
+    Surface.StrokeRectangle(NextBtn, Colors.Stroke.ToRgba8(), StepR, 1.0f);
     {
-        const ColorRgba ChevInk = NextDisabled ? ColorRgba{ 95u, 98u, 104u, 255u } : ColorRgba{ 201u, 204u, 209u, 255u };
+        const ColorRgba ChevInk = (NextDisabled ? Colors.TextFaint : Colors.TextDim).ToRgba8();
         const Point2D   C       = NextBtn.Center();
         const std::array<Point2D, 3u> Chev = {{
             { C.X - 2.2f, C.Y - 4.0f },
@@ -632,7 +632,7 @@ float ConstructPageStrip(
     }
     if (NextHov && Input.PrimaryPointer.Pressed)
     {
-        ++InOutActivePage;
+        InOutActivePage = (InOutActivePage + 1u) % PageCount;
         OutPageSwitched = true;
     }
 
@@ -641,55 +641,56 @@ float ConstructPageStrip(
     const float       RailW = std::max(56.0f, NextBtn.X - 6.0f - RailX);
     const float       RailR = StripH * 0.5f;
     const Rectangle2D RailRect { RailX, TopY, RailW, StripH };
-    Surface.FillRectangle(RailRect, InspectorMetrics::PageRailFill, RailR);
-    Surface.StrokeRectangle(RailRect, ColorRgba{ 255u, 255u, 255u, 18u }, RailR, 1.0f);
+    Surface.FillRectangle(RailRect, RailFill, RailR);
+    Surface.StrokeRectangle(RailRect, Colors.Stroke.ToRgba8(), RailR, 1.0f);
 
     const Rectangle2D RailInner { RailRect.X + 3.0f, RailRect.Y + 3.0f, std::max(24.0f, RailRect.Width - 6.0f), StripH - 6.0f };
     Surface.PushClip(RailInner);
 
     // Compute exact horizontal positions of all tabs, then scroll to center active tab inside RailInner (1:1 HTML .pc-rail)
-    std::array<float, 16u> TabWidths{};
-    std::array<float, 16u> TabLefts{};
-    const uint32_t SafeCount = std::min(PageCount, 16u);
-    float TotalTrackW = 0.0f;
-    for (uint32_t Idx = 0u; Idx < SafeCount; ++Idx)
+    const auto TabWidth = [&](uint32_t Idx) noexcept
     {
         const float LabelW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 12.0f, PageLabels[Idx]);
-        const float TabW   = std::min(134.0f, 4.0f + 18.0f + 8.0f + LabelW + 16.0f);
-        TabLefts[Idx]      = TotalTrackW;
-        TabWidths[Idx]     = TabW;
-        TotalTrackW       += TabW + 2.0f;
-    }
-    if (TotalTrackW > 2.0f) TotalTrackW -= 2.0f;
-
-    const float MaxRailScroll = std::max(0.0f, TotalTrackW - RailInner.Width);
-    const float ActiveMid     = TabLefts[InOutActivePage] + TabWidths[InOutActivePage] * 0.5f;
-    const float RailScrollX   = std::clamp(ActiveMid - RailInner.Width * 0.5f, 0.0f, MaxRailScroll);
-
-    for (uint32_t Idx = 0u; Idx < SafeCount; ++Idx)
+        return std::min(134.0f, 4.0f + 18.0f + 8.0f + LabelW + 16.0f);
+    };
+    float TotalTrackW = 0.0f;
+    float ActiveMid = 0.0f;
+    for (uint32_t Idx = 0u; Idx < PageCount; ++Idx)
     {
-        const float TabX = RailInner.X + TabLefts[Idx] - RailScrollX;
-        const float TabW = TabWidths[Idx];
+        const float Width = TabWidth(Idx);
+        if (Idx == InOutActivePage) ActiveMid = TotalTrackW + Width * 0.5f;
+        TotalTrackW += Width + 2.0f;
+    }
+    TotalTrackW = std::max(0.0f, TotalTrackW - 2.0f);
+    const float MaxRailScroll = std::max(0.0f, TotalTrackW - RailInner.Width);
+    const float RailScrollX = std::clamp(ActiveMid - RailInner.Width * 0.5f, 0.0f, MaxRailScroll);
+
+    float TabLeft = 0.0f;
+    for (uint32_t Idx = 0u; Idx < PageCount; ++Idx)
+    {
+        const float TabX = RailInner.X + TabLeft - RailScrollX;
+        const float TabW = TabWidth(Idx);
+        TabLeft += TabW + 2.0f;
         if (TabX + TabW < RailInner.X - 2.0f || TabX > RailInner.Right() + 2.0f) continue;
 
         const bool Open = (Idx == InOutActivePage);
         const Rectangle2D TabRect { TabX, RailInner.Y, TabW, RailInner.Height };
         const float TabPillR = TabRect.Height * 0.5f;
-        const bool Hovered = RailInner.Contains(Cursor) && TabRect.Contains(Cursor);
+        const bool Hovered = Input.PrimaryPointer.Enabled && RailInner.Contains(Cursor) && TabRect.Contains(Cursor);
 
         if (Open)
         {
-            Surface.FillRectangle(TabRect, InspectorMetrics::PageTabOpenFill, TabPillR);
-            Surface.StrokeRectangle(TabRect, ColorRgba{ 255u, 255u, 255u, 20u }, TabPillR, 1.0f);
+            Surface.FillRectangle(TabRect, Colors.Selected.ToRgba8(), TabPillR);
+            Surface.StrokeRectangle(TabRect, Colors.Stroke.ToRgba8(), TabPillR, 1.0f);
         }
         else if (Hovered)
         {
-            Surface.FillRectangle(TabRect, ColorRgba{ 255u, 255u, 255u, 12u }, TabPillR);
+            Surface.FillRectangle(TabRect, Colors.Raised.ToRgba8(), TabPillR);
         }
 
         // 18x18 circular number indicator
         const Point2D CircleCenter { TabRect.X + 13.0f, TabRect.Center().Y };
-        Surface.FillCircle(CircleCenter, 9.0f, Open ? InspectorMetrics::PageNumOpenFill : InspectorMetrics::PageNumClosedFill);
+        Surface.FillCircle(CircleCenter, 9.0f, Open ? Colors.Primary.ToRgba8() : Colors.SectionSubtle.ToRgba8());
         char NumBuf[16]{};
         std::snprintf(NumBuf, sizeof(NumBuf), "%u", Idx + 1u);
         const float NumW = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::SemiBold, 10.5f, NumBuf);
@@ -698,7 +699,7 @@ float ConstructPageStrip(
             FontWeightClass::SemiBold,
             { CircleCenter.X - NumW * 0.5f, CircleCenter.Y - 5.5f },
             10.5f,
-            Open ? ColorRgba{ 20u, 20u, 22u, 255u } : ColorRgba{ 201u, 204u, 209u, 255u },
+            Open ? Colors.PrimaryInk.ToRgba8() : Colors.TextDim.ToRgba8(),
             NumBuf);
 
         WorkspaceAppearance::ConstructTruncatedText(
@@ -707,7 +708,7 @@ float ConstructPageStrip(
             { TabRect.X + 28.0f, TabRect.Y + 7.5f },
             std::max(10.0f, TabRect.Width - 36.0f),
             12.0f,
-            Open ? ColorRgba{ 244u, 244u, 245u, 255u } : ColorRgba{ 154u, 158u, 165u, 255u },
+            Open ? Colors.Text.ToRgba8() : Colors.TextDim.ToRgba8(),
             PageLabels[Idx]);
 
         if (Hovered && Input.PrimaryPointer.Pressed && !Open)
@@ -725,7 +726,7 @@ float ConstructPageStrip(
             const float BandW = 3.5f;
             const float BandX = RailInner.X + static_cast<float>(Band) * BandW;
             const uint8_t A   = static_cast<uint8_t>(210u - Band * 42u);
-            Surface.FillRectangle({ BandX, RailInner.Y, BandW, RailInner.Height }, InspectorMetrics::PageRailFill.WithAlpha(A));
+            Surface.FillRectangle({ BandX, RailInner.Y, BandW, RailInner.Height }, RailFill.WithAlpha(A));
         }
     }
     if (RailScrollX < MaxRailScroll - 1.0f)
@@ -735,11 +736,15 @@ float ConstructPageStrip(
             const float BandW = 3.5f;
             const float BandX = RailInner.Right() - static_cast<float>(5 - Band) * BandW;
             const uint8_t A   = static_cast<uint8_t>(40u + Band * 42u);
-            Surface.FillRectangle({ BandX, RailInner.Y, BandW, RailInner.Height }, InspectorMetrics::PageRailFill.WithAlpha(A));
+            Surface.FillRectangle({ BandX, RailInner.Y, BandW, RailInner.Height }, RailFill.WithAlpha(A));
         }
     }
 
     Surface.PopClip();
+    std::snprintf(CounterBuf, sizeof(CounterBuf), "%u / %u", InOutActivePage + 1u, PageCount);
+    const float TextWidth = WorkspaceAppearance::MeasureWeightedTextWidth(Surface, FontWeightClass::Regular, 10.5f, CounterBuf);
+    WorkspaceAppearance::ConstructWeightedText(
+        Surface, FontWeightClass::Regular, { RightEdge - TextWidth, TopY + 10.5f }, 10.5f, Colors.TextDim.ToRgba8(), CounterBuf);
     return TopY + StripH + 12.0f;
 }
 
