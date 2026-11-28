@@ -1,1 +1,2 @@
-# Frontier-
+# Frontier
+General Purpose Editor
